@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TurboPulse Documentation | High-Performance Rate Limiter & Background Queue</title>
-  <meta name="description" content="Official documentation for TurboPulse: Zero-copy distributed rate limiting and job queue for Node.js powered by Rust and Redis.">
+  <title>turbopulse Documentation</title>
+  <meta name="description" content="Technical documentation for turbopulse: Native rate limiter and distributed background job queue for Node.js powered by Rust and Redis.">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
 </head>
@@ -15,17 +15,17 @@
     <div style="display: flex; align-items: center; gap: 16px;">
       <button class="menu-toggle" id="menu-toggle" aria-label="Toggle Navigation">☰</button>
       <a href="#" class="brand">
-        <span>⚡ turbopulse</span>
+        <span>turbopulse</span>
         <span class="brand-badge">v1.0.0</span>
       </a>
     </div>
 
     <div class="nav-controls">
       <div class="search-box">
-        <span class="search-icon">🔍</span>
-        <input type="text" id="search-input" class="search-input" placeholder="Search docs (e.g. queue, group)...">
+        <span class="search-icon">Search</span>
+        <input type="text" id="search-input" class="search-input" placeholder="Search documentation...">
       </div>
-      <button class="btn-icon" id="theme-toggle" aria-label="Toggle Dark/Light Mode" title="Toggle Theme"></button>
+      <button class="btn-icon" id="theme-toggle" aria-label="Toggle Theme" title="Toggle Theme"></button>
       <a href="https://github.com/Saiop68/turbopulse" target="_blank" rel="noopener" class="btn-icon" title="View on GitHub">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
@@ -42,46 +42,46 @@
       <div class="sidebar-group">
         <div class="sidebar-title">Getting Started</div>
         <ul class="sidebar-links">
-          <li><a href="#intro" class="sidebar-link active">Introduction</a></li>
-          <li><a href="#beginner-concepts" class="sidebar-link">Beginner Concepts Explained</a></li>
+          <li><a href="#intro" class="sidebar-link active">Overview</a></li>
+          <li><a href="#core-concepts" class="sidebar-link">Core Concepts</a></li>
           <li><a href="#installation" class="sidebar-link">Installation</a></li>
-          <li><a href="#quickstart" class="sidebar-link">5-Minute Quickstart</a></li>
+          <li><a href="#quickstart" class="sidebar-link">Quickstart</a></li>
         </ul>
       </div>
 
       <div class="sidebar-group">
         <div class="sidebar-title">Rate Limiting</div>
         <ul class="sidebar-links">
-          <li><a href="#rate-limiting-basics" class="sidebar-link">Basic Rate Limiting</a></li>
-          <li><a href="#tickets-middleware" class="sidebar-link">Tickets & Middleware</a></li>
+          <li><a href="#rate-limiting-basics" class="sidebar-link">RateLimiter</a></li>
+          <li><a href="#tickets-middleware" class="sidebar-link">Non-Blocking Tickets</a></li>
           <li><a href="#multi-tenant-groups" class="sidebar-link">Multi-Tenant Groups</a></li>
-          <li><a href="#leased-limiter" class="sidebar-link">High-Frequency Leased (L1/L2)</a></li>
+          <li><a href="#leased-limiter" class="sidebar-link">Two-Tier Leased Limiter</a></li>
         </ul>
       </div>
 
       <div class="sidebar-group">
         <div class="sidebar-title">Job Queues & Workers</div>
         <ul class="sidebar-links">
-          <li><a href="#queues" class="sidebar-link">Queue Management</a></li>
-          <li><a href="#workers" class="sidebar-link">Workers & Concurrency</a></li>
-          <li><a href="#job-lifecycle" class="sidebar-link">Job Progress & Lifecycle</a></li>
-          <li><a href="#dag-flows" class="sidebar-link">Parent-Child Workflows (DAGs)</a></li>
+          <li><a href="#queues" class="sidebar-link">Queues</a></li>
+          <li><a href="#workers" class="sidebar-link">Workers</a></li>
+          <li><a href="#job-lifecycle" class="sidebar-link">Job Lifecycle & State</a></li>
+          <li><a href="#dag-flows" class="sidebar-link">Workflows & DAGs</a></li>
         </ul>
       </div>
 
       <div class="sidebar-group">
-        <div class="sidebar-title">Engine Superpowers</div>
+        <div class="sidebar-title">Architecture</div>
         <ul class="sidebar-links">
-          <li><a href="#automatic-features" class="sidebar-link">The 8 Automatic Features</a></li>
-          <li><a href="#benchmarks" class="sidebar-link">Benchmarks & Performance</a></li>
-          <li><a href="#production-safety" class="sidebar-link">Event Loop & Production Safety</a></li>
+          <li><a href="#automatic-features" class="sidebar-link">Automated Systems</a></li>
+          <li><a href="#benchmarks" class="sidebar-link">Benchmarks & Hardware</a></li>
+          <li><a href="#production-safety" class="sidebar-link">Event Loop Guarantees</a></li>
         </ul>
       </div>
 
       <div class="sidebar-group">
         <div class="sidebar-title">Reference</div>
         <ul class="sidebar-links">
-          <li><a href="#api-reference" class="sidebar-link">Full API Reference</a></li>
+          <li><a href="#api-reference" class="sidebar-link">Configuration Options</a></li>
           <li><a href="#license" class="sidebar-link">License</a></li>
         </ul>
       </div>
@@ -92,94 +92,74 @@
 
       <!-- Section: Intro -->
       <section id="intro" class="section">
-        <h1>TurboPulse Documentation</h1>
-        <p>TurboPulse is a unified, high-performance distributed rate limiter and background job queue for Node.js, powered by a native Rust core (compiled via <code>napi-rs</code>) and Redis.</p>
+        <h1>turbopulse</h1>
+        <p>A native rate limiter and distributed background job queue engine for Node.js, built with compiled Rust (via <code>napi-rs</code>) and Redis.</p>
         
         <div class="cards-grid">
           <div class="card">
-            <div class="card-title">🚀 Native Rust Performance</div>
-            <p>Delivers 3,800,000+ ops/sec in-memory and 2,000,000+ ops/sec distributed with zero V8 GC pauses and sub-microsecond latency.</p>
+            <div class="card-title">Native Memory Model</div>
+            <p>Queue items and token reservoirs reside directly in Rust heap memory. Job data is transferred via zero-copy Node.js Buffers to prevent V8 Garbage Collection pauses.</p>
           </div>
           <div class="card">
-            <div class="card-title">⚡ Zero Event Loop Stalling</div>
-            <p>All Redis network I/O and Rust CPU workloads run on Tokio background threads. Node's single-threaded event loop remains completely unblocked.</p>
+            <div class="card-title">Non-Blocking Execution</div>
+            <p>All native Rust computations and Redis network I/O run on background Tokio worker threads, returning standard Promises that immediately yield to the libuv event loop.</p>
           </div>
           <div class="card">
-            <div class="card-title">🛡️ Built-in Resilience</div>
-            <p>Automated stalled job recovery, exponential retries with jitter, and single master timer wheels protect against herd spikes and node crashes.</p>
+            <div class="card-title">Resilience & Recovery</div>
+            <p>Built-in distributed lock expiration heartbeats, exponential retries with jitter, and a single master timer wheel to avoid libuv timer min-heap overhead.</p>
           </div>
         </div>
       </section>
 
-      <!-- Section: Beginner Concepts -->
-      <section id="beginner-concepts" class="section">
-        <h2>Beginner Concepts Explained</h2>
-        <p>If you are new to backend development, rate limiters and background queues can sound intimidating. Here is what they do in plain English:</p>
+      <!-- Section: Core Concepts -->
+      <section id="core-concepts" class="section">
+        <h2>Core Concepts</h2>
 
-        <h3>1. What is a Rate Limiter?</h3>
-        <p>Think of a rate limiter like a <strong>bouncer at the door of a popular nightclub</strong>:</p>
-        <ul>
-          <li>If 500 people try to rush through the door at the exact same second, the club gets wrecked and the servers crash.</li>
-          <li>The bouncer only lets 5 people inside every second (<code>maxConcurrent</code> and <code>minTime</code>).</li>
-          <li>Everyone else waits in a polite, organized line, or gets told <em>"Come back in 10 seconds"</em> (HTTP 429).</li>
-        </ul>
-        <div class="callout tip">
-          <div class="callout-title">When do you need a Rate Limiter?</div>
-          <p>Whenever you call paid third-party APIs (Stripe, OpenAI, Twilio), whenever users submit login requests (preventing brute-force password guessing), or when serving public API routes.</p>
-        </div>
+        <h3>1. What is Rate Limiting?</h3>
+        <p>Rate limiting restricts how frequently an action or function can be executed over time (e.g. max 100 requests per minute, or max 5 concurrent operations). It protects APIs from exhaustion, prevents brute-force login attempts, and keeps third-party API bills under control.</p>
 
         <h3>2. What is a Background Job Queue?</h3>
-        <p>Think of a background queue like <strong>ordering food in a restaurant</strong>:</p>
-        <ul>
-          <li>When you order food, the waiter does not make you stand at the counter for 20 minutes while the chef grills the steak.</li>
-          <li>The waiter hands you a receipt with an order ID, and the order ticket is placed in a <strong>Queue</strong> in the kitchen.</li>
-          <li><strong>Workers</strong> (the cooks) pull orders from the queue one by one, cook the meals in the background, and notify you when ready.</li>
-        </ul>
-        <div class="callout tip">
-          <div class="callout-title">When do you need a Background Queue?</div>
-          <p>Sending emails, generating PDF invoices, transcode video/audio, resizing uploaded images, running webhook dispatches, or processing Stripe checkout webhooks.</p>
-        </div>
+        <p>In web servers, long-running operations (such as processing images, delivering emails, or compiling reports) should not block the HTTP request-response cycle. A queue stores the task payload, allows the API to respond immediately to the client with a 200/202 status, and delegates execution to asynchronous background workers.</p>
 
-        <h3>3. Why Rust + Node.js?</h3>
-        <p>JavaScript is fantastic for writing web servers, but heavy queues and millions of rate limit permits create thousands of objects on the <strong>V8 Heap</strong>. When Node's Garbage Collector has to clean up millions of objects, it pauses your entire application (known as <em>Stop-the-World GC pauses</em>).</p>
-        <p>TurboPulse keeps all queues, priority trees, and rate limit tokens inside <strong>compiled native Rust memory</strong>. Node only sees lightweight Buffer pointers. Your V8 memory stays flat, and your server never freezes.</p>
+        <h3>3. Why Native Rust instead of Pure JavaScript?</h3>
+        <p>Pure JavaScript implementations store jobs and rate-limit counters as JavaScript objects on the V8 heap. Under high throughput (thousands of tasks per second), V8's Garbage Collector must periodically pause the entire application to clean up temporary objects. TurboPulse stores queue records and tokens in native Rust memory, completely bypassing V8 GC pressure.</p>
       </section>
 
       <!-- Section: Installation -->
       <section id="installation" class="section">
         <h2>Installation</h2>
-        <p>Install TurboPulse into your Node.js or TypeScript project via npm:</p>
+        <p>Install via npm:</p>
         
         <div class="code-container">
           <div class="code-header">
-            <span>Terminal</span>
+            <span>bash</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-bash">npm install turbopulse</code></pre>
         </div>
 
-        <p>TurboPulse includes pre-built native binaries for:</p>
+        <p>Pre-compiled native binaries are bundled for:</p>
         <ul>
           <li><strong>Linux:</strong> x86_64, aarch64 (ARM64 / AWS Graviton), musl (Alpine Docker)</li>
           <li><strong>macOS:</strong> Apple Silicon (M1/M2/M3/M4), Intel x86_64</li>
           <li><strong>Windows:</strong> x86_64</li>
         </ul>
-        <p>No local C++ compiler, Python, or Rust toolchain is required on production servers.</p>
+        <p>No local C++ compiler, Python, or Rust toolchain is required on client or production machines.</p>
       </section>
 
       <!-- Section: Quickstart -->
       <section id="quickstart" class="section">
-        <h2>5-Minute Quickstart</h2>
+        <h2>Quickstart</h2>
 
-        <h3>1. Your First Rate Limiter</h3>
+        <h3>1. Rate Limiting Example</h3>
         <div class="code-container">
           <div class="code-header">
-            <span>quickstart-limiter.ts</span>
+            <span>rate_limiter_quickstart.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { RateLimiter } from 'turbopulse';
 
-// Allow max 2 tasks at once, with at least 50ms between them
+// Limit execution to 2 concurrent tasks with at least 50ms spacing
 const limiter = new RateLimiter({
   maxConcurrent: 2,
   minTime: 50,
@@ -187,104 +167,80 @@ const limiter = new RateLimiter({
 
 async function run() {
   const task = (id: number) => limiter.schedule(async () => {
-    console.log(`Starting task ${id}...`);
     await new Promise(r => setTimeout(r, 100));
-    return `Result ${id}`;
+    return `Task ${id} completed`;
   });
 
-  // Launch 6 tasks simultaneously - limiter paces them automatically!
   const results = await Promise.all([
-    task(1), task(2), task(3), task(4), task(5), task(6)
+    task(1), task(2), task(3), task(4)
   ]);
-  console.log('All tasks finished:', results);
+  console.log(results);
 }
 
 run();</code></pre>
         </div>
 
-        <h3>2. Your First Queue & Worker</h3>
+        <h3>2. Background Queue & Worker Example</h3>
         <div class="code-container">
           <div class="code-header">
-            <span>quickstart-queue.ts</span>
+            <span>queue_quickstart.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { Queue, Worker } from 'turbopulse';
 
-// 1. Create a queue (runs in-memory or connects to Redis)
+// 1. Create a queue
 const emailQueue = new Queue('emails');
 
-// 2. Create a background worker that processes email jobs
+// 2. Register worker to process tasks
 const emailWorker = new Worker('emails', async (job) => {
-  console.log(`Sending email to ${job.data.to}...`);
   await job.updateProgress(50);
-  
-  // Simulated email send
-  await new Promise(r => setTimeout(r, 200));
-  
+  // Perform background work
   await job.updateProgress(100);
-  return { delivered: true, timestamp: Date.now() };
+  return { delivered: true, recipient: job.data.to };
 }, { concurrency: 4 });
 
 emailWorker.on('completed', (job, result) => {
-  console.log(`Email job #${job.id} completed!`, result);
+  console.log(`Job #${job.id} finished:`, result);
 });
 
-// 3. Enqueue jobs from your web route
-async function sendWelcomeEmails() {
-  await emailQueue.add('welcomeEmail', { to: 'alice@example.com' });
-  await emailQueue.add('welcomeEmail', { to: 'bob@example.com' });
-}
-
-sendWelcomeEmails();</code></pre>
+// 3. Enqueue jobs
+await emailQueue.add('welcomeEmail', { to: 'user@example.com' });</code></pre>
         </div>
       </section>
 
       <!-- Section: Rate Limiting In-Depth -->
       <section id="rate-limiting-basics" class="section">
-        <h2>Basic Rate Limiting In-Depth</h2>
-        <p>The <code>RateLimiter</code> class controls pacing, concurrency limits, token buckets, and load shedding strategies.</p>
+        <h2>RateLimiter API</h2>
+        <p>The <code>RateLimiter</code> class controls concurrency limits, spacing, token reservoirs, and load shedding strategies.</p>
 
         <div class="code-container">
           <div class="code-header">
-            <span>rate_limiter_options.ts</span>
+            <span>limiter_config.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { RateLimiter } from 'turbopulse';
 
 const limiter = new RateLimiter({
-  maxConcurrent: 5,                   // Maximum 5 operations active simultaneously
-  minTime: 20,                        // Minimum 20ms between task starts
-  reservoir: 100,                     // 100 tokens initial quota
-  reservoirRefreshAmount: 100,        // Refills 100 tokens...
-  reservoirRefreshInterval: 60 * 1000,// ...every 60 seconds
-  highWater: 50,                      // If queue exceeds 50 items, apply strategy
-  strategy: RateLimiter.strategy.OVERFLOW, // Drop new jobs when highWater exceeded
-  rejectOnDrop: true,                 // Reject promise with Error on dropped jobs
-});</code></pre>
-        </div>
+  maxConcurrent: 5,                   // Maximum parallel tasks
+  minTime: 20,                        // Minimum delay (ms) between consecutive starts
+  reservoir: 100,                     // Initial quota
+  reservoirRefreshAmount: 100,        // Tokens replenished...
+  reservoirRefreshInterval: 60 * 1000,// ...per interval (60 seconds)
+  highWater: 50,                      // Queue threshold before strategy activates
+  strategy: RateLimiter.strategy.OVERFLOW, // Drop incoming tasks when queue is full
+  rejectOnDrop: true,                 // Reject promise with Error on dropped tasks
+});
 
-        <h3>Function Wrapping</h3>
-        <p>Transform any existing asynchronous function into an automatically throttled function:</p>
-        <div class="code-container">
-          <div class="code-header">
-            <span>wrap_example.ts</span>
-            <button class="btn-copy">Copy</button>
-          </div>
-          <pre><code class="language-typescript">const rawFetchUser = async (userId: string) => {
-  return await fetch(`https://api.github.com/users/${userId}`);
-};
-
-// Returns a drop-in replacement with identical signature
-const safeFetchUser = limiter.wrap(rawFetchUser);
-
-const user = await safeFetchUser('torvalds');</code></pre>
+// Wrapping existing functions:
+const safeFetch = limiter.wrap(fetch);
+const response = await safeFetch('https://api.example.com/data');</code></pre>
         </div>
       </section>
 
       <!-- Section: Tickets & Middleware -->
       <section id="tickets-middleware" class="section">
-        <h2>Tickets & Middleware Integration</h2>
-        <p>In web servers (Express, Fastify, NestJS), you often want to reject or permit HTTP requests immediately without queueing them up:</p>
+        <h2>Non-Blocking Tickets & Middleware</h2>
+        <p>In web servers (Express, Fastify), you often need to permit or reject incoming requests immediately without queueing them up:</p>
 
         <div class="code-container">
           <div class="code-header">
@@ -295,15 +251,14 @@ const user = await safeFetchUser('torvalds');</code></pre>
 import { RateLimiter } from 'turbopulse';
 
 const app = express();
-const apiLimiter = new RateLimiter({
+const limiter = new RateLimiter({
   reservoir: 50,
   reservoirRefreshInterval: 1000,
   maxConcurrent: 10,
 });
 
 app.use('/api', async (req, res, next) => {
-  // Non-blocking permit check
-  const ticket = await apiLimiter.tryTicket(1);
+  const ticket = await limiter.tryTicket(1);
   
   if (!ticket.allowed) {
     res.setHeader('Retry-After', Math.ceil(ticket.retryAfterMs / 1000));
@@ -313,7 +268,6 @@ app.use('/api', async (req, res, next) => {
     });
   }
 
-  // Release permit when HTTP response completes
   res.on('finish', async () => {
     await ticket.release();
   });
@@ -325,33 +279,31 @@ app.use('/api', async (req, res, next) => {
 
       <!-- Section: Multi-Tenant Groups -->
       <section id="multi-tenant-groups" class="section">
-        <h2>Multi-Tenant Rate Limiter Groups</h2>
-        <p>In SaaS applications, each user or company tenant must have their own isolated rate limit. A rogue customer spamming requests should never degrade other users.</p>
+        <h2>Multi-Tenant Groups</h2>
+        <p>Isolate rate limits per user, route, or API key with shared base configuration:</p>
 
         <div class="code-container">
           <div class="code-header">
-            <span>multitenant_groups.ts</span>
+            <span>groups.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { RateLimiter } from 'turbopulse';
 
-// Define base options for all tenants
-const tenantGroup = new RateLimiter.Group({
+const group = new RateLimiter.Group({
   maxConcurrent: 2,
   minTime: 25,
   reservoir: 60,
   reservoirRefreshInterval: 60000,
 });
 
-// Calling .key(id) or .schedule(id, fn) automatically provisions an isolated limiter
+// Calling .schedule(id, fn) automatically creates an isolated limiter on first access
 async function handleUserApiCall(userId: string) {
-  return await tenantGroup.schedule(userId, async () => {
-    return await processRequestForUser(userId);
+  return await group.schedule(userId, async () => {
+    return await executeQuery(userId);
   });
 }
 
-// User A spams 500 requests -> throttled cleanly
-// User B makes 1 request -> executed instantly with 0ms delay!
+// User A's traffic spike has zero impact on User B
 handleUserApiCall('user_A');
 handleUserApiCall('user_B');</code></pre>
         </div>
@@ -359,9 +311,9 @@ handleUserApiCall('user_B');</code></pre>
 
       <!-- Section: Leased Limiter -->
       <section id="leased-limiter" class="section">
-        <h2>High-Frequency Leased Limiter (L1 / L2)</h2>
-        <p>Standard rate limiters send a TCP packet to Redis for every single request, capping performance at ~20,000 ops/sec due to network roundtrip latency.</p>
-        <p>TurboPulse implements the <strong>Two-Tier L1/L2 Leased Reservoir Architecture</strong> (used by Stripe, AWS, and Cloudflare) to achieve <strong>2,000,000+ ops/sec</strong> against Redis:</p>
+        <h2>Two-Tier Leased Limiter (L1 / L2)</h2>
+        <p>Standard rate limiters issue a network roundtrip to Redis for every token, bounding single-thread throughput to ~20,000 ops/sec due to TCP network latency.</p>
+        <p>TurboPulse provides a <strong>Two-Tier L1/L2 Leased Architecture</strong> to achieve <strong>2,000,000+ ops/sec</strong> against Redis:</p>
 
         <div class="code-container">
           <div class="code-header">
@@ -381,128 +333,118 @@ const leasedLimiter = engine.createLeasedRateLimiter(
     refillRate: 100_000,
     refillIntervalMs: 1000,
   },
-  'api_gateway_hot_path',
+  'gateway_route',
   {
-    leaseBatchSize: 500, // Leases 500 tokens atomically per Redis Lua call
+    leaseBatchSize: 500, // Leases 500 tokens per atomic Redis Lua roundtrip
     lowWatermark: 100,    // Pre-fetches in background when under 100 tokens
   }
 );
 
-// Served from local CPU registers in sub-microseconds (250ns)
-const result = await leasedLimiter.acquire(1);
-if (result.allowed) {
-  // Execute request
-}</code></pre>
+// Served from local CPU registers in 250 nanoseconds
+const permit = await leasedLimiter.acquire(1);</code></pre>
         </div>
       </section>
 
       <!-- Section: Queues -->
       <section id="queues" class="section">
-        <h2>Distributed Job Queue Guide</h2>
-        <p>The <code>Queue</code> class handles task enqueuing, priority sorting, delay scheduling, retries, and maintenance operations.</p>
+        <h2>Queue Operations</h2>
 
         <div class="code-container">
           <div class="code-header">
-            <span>queue_operations.ts</span>
+            <span>queue_methods.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { Queue } from 'turbopulse';
 
-const queue = new Queue('videoTranscode', {
+const queue = new Queue('transcode', {
   connection: { host: '127.0.0.1', port: 6379 },
 });
 
-// Single job enqueue with full options
+// Enqueue with options
 const job = await queue.add(
-  'transcode4K', 
-  { fileId: 'vid_994', resolution: '4K' }, 
+  'encodeJob', 
+  { file: 'video.mp4' }, 
   {
-    priority: 10,                                              // Higher number executes first
+    priority: 10,                                              // Higher number = higher priority
     delay: 5000,                                               // Delay execution by 5000ms
-    attempts: 5,                                               // Retry up to 5 times on failure
+    attempts: 4,                                               // Max retry attempts on failure
     backoff: { type: 'exponential', delay: 1000, jitter: true },// Exponential retry backoff
-    deduplication: { id: 'transcode_vid_994' },                // Prevents duplicate enqueues
+    deduplication: { id: 'file_video_mp4' },                   // Deduplication key
   }
 );
 
-// Bulk job enqueue (atomically pushes thousands of jobs in one native call)
+// Atomic bulk enqueue
 await queue.addBulk([
-  { name: 'notify', data: { user: 1 }, opts: { priority: 1 } },
-  { name: 'notify', data: { user: 2 }, opts: { priority: 2 } },
+  { name: 'taskA', data: { id: 1 }, opts: { priority: 5 } },
+  { name: 'taskB', data: { id: 2 }, opts: { priority: 1 } },
 ]);
 
-// Inspect counts
-const counts = await queue.getJobCounts();
-console.log(counts); // { waiting: 100, active: 4, completed: 500, failed: 0 }</code></pre>
+// Maintenance
+await queue.pause();
+await queue.resume();
+await queue.clean(60000, 1000, 'completed');
+await queue.drain();
+await queue.obliterate();</code></pre>
         </div>
       </section>
 
       <!-- Section: Workers -->
       <section id="workers" class="section">
-        <h2>Workers & Concurrency</h2>
-        <p>Workers listen to the queue, manage concurrent processing slots, evaluate heartbeats, and handle errors safely:</p>
+        <h2>Workers & Processors</h2>
 
         <div class="code-container">
           <div class="code-header">
-            <span>worker_processor.ts</span>
+            <span>worker_setup.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { Worker } from 'turbopulse';
 
 const worker = new Worker(
-  'videoTranscode',
+  'transcode',
   async (job) => {
-    // 1. Log messages to the job execution history
-    await job.log('Starting encoder...');
-    
-    // 2. Report progress percentage (0 - 100)
+    await job.log('Starting execution');
     await job.updateProgress(25);
     
-    // 3. Mutate payload data in-place if needed
-    await job.updateData({ ...job.data, step: 'encoding' });
+    // Process task data
+    const result = await processFile(job.data);
     
-    // 4. Return value (automatically serialized and stored)
-    return { success: true, s3Url: 's3://bucket/output.mp4' };
+    await job.updateProgress(100);
+    return result;
   },
   {
     connection: { host: '127.0.0.1', port: 6379 },
-    concurrency: 8,                         // Process 8 jobs in parallel
+    concurrency: 8,                         // 8 parallel execution slots
     limiter: { max: 100, duration: 1000 },  // Rate limit worker execution
-    lockDuration: 30000,                    // 30-second lock lease
-    stalledInterval: 30000,                 // Automated stalled job recovery check
+    lockDuration: 30000,                    // 30s lock before treated as stalled
+    stalledInterval: 30000,                 // Stalled job recovery heartbeat
   }
 );
 
-// Lifecycle event hooks
-worker.on('active', (job) => console.log(`Job ${job.id} started`));
+worker.on('active', (job) => console.log(`Job ${job.id} active`));
 worker.on('completed', (job, result) => console.log(`Job ${job.id} done:`, result));
 worker.on('failed', (job, err) => console.error(`Job ${job.id} failed:`, err.message));
-worker.on('stalled', (count) => console.warn(`Recovered ${count} orphaned jobs!`));</code></pre>
+worker.on('stalled', (count) => console.warn(`Recovered ${count} stalled jobs`));</code></pre>
         </div>
       </section>
 
       <!-- Section: Job Lifecycle -->
       <section id="job-lifecycle" class="section">
-        <h2>Job Lifecycle & State Inspection</h2>
+        <h2>Job Lifecycle & State</h2>
         
         <div class="code-container">
           <div class="code-header">
-            <span>job_inspection.ts</span>
+            <span>job_state.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">const job = await queue.getJob('job_123');
 
 if (job) {
-  // Query state ('waiting' | 'active' | 'completed' | 'failed' | 'delayed')
-  const state = await job.getState();
-  
-  // Inspect progress
+  const state = await job.getState(); // 'waiting' | 'active' | 'completed' | 'failed' | 'delayed'
   console.log(`Progress: ${job.progress}%`);
-  console.log(`Attempts made: ${job.attemptsMade}`);
-  console.log(`Result:`, job.returnValue);
+  console.log(`Attempts: ${job.attemptsMade}`);
+  console.log(`Return value:`, job.returnValue);
 
-  // Manual actions
-  await job.promote(); // Moves a delayed job to waiting queue immediately
+  await job.promote(); // Promotes delayed job to waiting queue immediately
   await job.discard(); // Fails the job permanently without further retries
 }</code></pre>
         </div>
@@ -510,8 +452,8 @@ if (job) {
 
       <!-- Section: DAG Flows -->
       <section id="dag-flows" class="section">
-        <h2>Hierarchical DAG Workflows (FlowProducer)</h2>
-        <p>In complex architectures, parent jobs must wait for several independent child tasks across different queues before executing:</p>
+        <h2>Workflows & DAGs (FlowProducer)</h2>
+        <p>Coordinate multi-stage dependencies where parent jobs wait for child tasks across different queues before executing:</p>
 
         <div class="code-container">
           <div class="code-header">
@@ -538,10 +480,7 @@ await flow.add({
     {
       name: 'fetchStripeCharges',
       queueName: 'payments',
-      data: { customerId: 'cust_404' },
-      children: [
-        { name: 'verifyTaxExemption', queueName: 'compliance', data: {} }
-      ]
+      data: { customerId: 'cust_404' }
     }
   ]
 });</code></pre>
@@ -550,40 +489,40 @@ await flow.add({
 
       <!-- Section: Automatic Features -->
       <section id="automatic-features" class="section">
-        <h2>The 8 Automatic Engine Superpowers</h2>
-        <p>TurboPulse eliminates manual boilerplate with 8 built-in autonomous systems:</p>
+        <h2>Automated Systems</h2>
+        <p>TurboPulse handles resilience, connection lifecycles, and scheduling automatically:</p>
 
         <div class="cards-grid">
           <div class="card">
-            <div class="card-title">1. Automated Stalled Recovery</div>
-            <p>If a worker pod crashes mid-execution (OOM kill or SIGKILL), TurboPulse automatically detects the expired lock lease and re-enqueues the job to a healthy worker.</p>
+            <div class="card-title">Stalled Job Recovery</div>
+            <p>If a worker node crashes mid-execution (OOM kill or SIGKILL), TurboPulse detects the expired lock lease and re-enqueues the job to a healthy worker.</p>
           </div>
           <div class="card">
-            <div class="card-title">2. Exponential Backoff & Jitter</div>
-            <p>Automatically calculates <code>delay * 2^attempts</code> with ±20% randomized jitter, self-healing transient 503/429 network spikes without thundering-herd collisions.</p>
+            <div class="card-title">Exponential Backoff & Jitter</div>
+            <p>Calculates <code>delay * 2^attempts</code> with ±20% randomized jitter, preventing thundering-herd synchronization spikes on downstream services.</p>
           </div>
           <div class="card">
-            <div class="card-title">3. Connection Multiplexing</div>
-            <p>All queues and limiters targeting the same Redis instance automatically share a single native connection pool, completely eliminating socket exhaustion.</p>
+            <div class="card-title">Connection Multiplexing</div>
+            <p>All queues and limiters targeting the same Redis instance share a single native connection pool, eliminating client socket exhaustion.</p>
           </div>
           <div class="card">
-            <div class="card-title">4. Master Timer Wheel</div>
-            <p>Collapses 5,000+ tenant limiters down to <strong>exactly 1 timer</strong> in Node.js, eliminating libuv timer min-heap thrashing.</p>
+            <div class="card-title">Hierarchical Timer Wheel</div>
+            <p>Collapses thousands of tenant rate limit schedules into <strong>1 master timer</strong> in Node.js, eliminating libuv timer min-heap thrashing.</p>
           </div>
           <div class="card">
-            <div class="card-title">5. Async Pre-Fetching (L1/L2)</div>
-            <p>Automatically leases token batches from Redis in the background, serving hot-path permits from CPU registers in 250 nanoseconds.</p>
+            <div class="card-title">Asynchronous Token Pre-fetching</div>
+            <p>Leases token batches from Redis in the background, serving hot-path permits from local memory in 250 nanoseconds.</p>
           </div>
           <div class="card">
-            <div class="card-title">6. Multi-Tenant Auto-Sharding</div>
-            <p>Calling <code>group.schedule(id, fn)</code> provisions isolated limiters on demand and cascades configuration updates automatically.</p>
+            <div class="card-title">Multi-Tenant Auto-Provisioning</div>
+            <p>Calling <code>group.schedule(id, fn)</code> provisions isolated limiters on demand and cascades configuration updates across active instances.</p>
           </div>
           <div class="card">
-            <div class="card-title">7. Stale Key Memory Sweeping</div>
-            <p>Tracks last-accessed timestamps on all rate limiter buckets, automatically freeing idle memory in high-cardinality visitor environments.</p>
+            <div class="card-title">Stale Key Sweeping</div>
+            <p>Tracks last-accessed timestamps on rate limiter buckets, freeing idle memory in high-cardinality visitor environments.</p>
           </div>
           <div class="card">
-            <div class="card-title">8. Automated DAG Promotion</div>
+            <div class="card-title">DAG Dependency Resolution</div>
             <p>Tracks multi-level child dependency trees in atomic Redis keys, automatically promoting parent jobs with child output attached.</p>
           </div>
         </div>
@@ -591,9 +530,9 @@ await flow.add({
 
       <!-- Section: Benchmarks -->
       <section id="benchmarks" class="section">
-        <h2>Benchmarks & Performance Specs</h2>
+        <h2>Benchmarks & Hardware Specs</h2>
 
-        <h3>Hardware Testbeds</h3>
+        <h3>Test Environments</h3>
         <ul>
           <li><strong>Production Cloud VPS (Linux):</strong> Ubuntu 22.04 LTS (x86_64), 4 vCPUs (AMD EPYC™ 7002 @ 2.5 GHz), 8 GB RAM, Node.js v20.18.0, Redis 7.0.15.</li>
           <li><strong>Dedicated Benchmark Workstation (Windows):</strong> Windows 11 Pro (x86_64), 8 physical cores (16 threads @ 3.8 GHz), 16 GB RAM, Node.js v20.20.0, Native Rust release build.</li>
@@ -712,25 +651,24 @@ await flow.add({
 
       <!-- Section: Production Safety -->
       <section id="production-safety" class="section">
-        <h2>Event Loop & Production Safety</h2>
+        <h2>Event Loop Guarantees</h2>
 
         <div class="callout tip">
-          <div class="callout-title">Zero Main Thread Blocking Guaranteed</div>
-          <p>Measured under sustained concurrency, TurboPulse's mean event loop delay is <strong>14.4 ms</strong> (matching the standard operating system timer quantum). Node.js never freezes.</p>
+          <div class="callout-title">Non-Blocking Event Loop Verification</div>
+          <p>Under continuous load, TurboPulse's mean event loop delay is <strong>14.4 ms</strong> (matching the operating system baseline timer quantum). Node.js never stalls.</p>
         </div>
 
-        <h3>Why TurboPulse Never Stalls Node's Main Thread</h3>
         <ol>
-          <li><strong>Tokio Worker Pool:</strong> All Redis commands, Lua script executions, and native Rust computations run on background worker threads.</li>
-          <li><strong>Zero Spin-Locks:</strong> Pauses and rate-limit wait periods use asynchronous timers and libuv check-phase ticks. CPU usage during waits is 0.0%.</li>
-          <li><strong>Guaranteed Concurrency Release:</strong> Permits are released inside <code>finally</code> blocks, guaranteeing zero slot leakage even on unhandled crashes.</li>
-          <li><strong>38/38 Runtime Input Validation Error Guards:</strong> Validates numeric bounds, non-empty strings, and executable functions at runtime, throwing clean <code>TypeError</code> exceptions at the call site.</li>
+          <li><strong>Tokio Worker Pool:</strong> All native Rust computations and Redis network I/O run on background Tokio worker threads.</li>
+          <li><strong>Zero Spin-Locks:</strong> Wait periods use asynchronous timers and libuv check-phase ticks. CPU usage during waits is 0.0%.</li>
+          <li><strong>Guaranteed Concurrency Release:</strong> Permits are released inside <code>finally</code> blocks, guaranteeing zero slot leakage even on unhandled exceptions.</li>
+          <li><strong>Runtime Input Validation Guards:</strong> Validates numeric bounds, non-empty strings, and executable functions at runtime, throwing clean <code>TypeError</code> exceptions at call sites.</li>
         </ol>
       </section>
 
       <!-- Section: API Reference -->
       <section id="api-reference" class="section">
-        <h2>Full API Reference</h2>
+        <h2>Configuration Reference</h2>
 
         <h3><code>LimiterOptions</code></h3>
         <div class="table-wrap">
@@ -766,7 +704,7 @@ await flow.add({
                 <td><code>reservoirRefreshAmount</code></td>
                 <td><code>number</code></td>
                 <td><code>undefined</code></td>
-                <td>Number of tokens added per refresh window.</td>
+                <td>Tokens added per refresh window.</td>
               </tr>
               <tr>
                 <td><code>reservoirRefreshInterval</code></td>
@@ -836,7 +774,7 @@ await flow.add({
                 <td><code>deduplication.id</code></td>
                 <td><code>string</code></td>
                 <td><code>undefined</code></td>
-                <td>Unique key preventing identical waiting jobs.</td>
+                <td>Unique key preventing duplicate waiting jobs.</td>
               </tr>
             </tbody>
           </table>
@@ -846,7 +784,7 @@ await flow.add({
       <!-- Section: License -->
       <section id="license" class="section">
         <h2>License</h2>
-        <p>TurboPulse is open-source software licensed under the <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener">MIT License</a>.</p>
+        <p>turbopulse is open-source software licensed under the <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener">MIT License</a>.</p>
       </section>
 
     </main>
