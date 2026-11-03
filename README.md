@@ -100,7 +100,7 @@ TurboPulse automates resilience, scheduling, and connection management without r
 | Property | Value |
 | :--- | :--- |
 | **NPM Package** | [`turbopulse`](https://www.npmjs.com/package/turbopulse) |
-| **Latest Release** | `1.0.2` (dist-tag `latest`) |
+| **Latest Release** | `1.0.3` (dist-tag `latest`) |
 | **License** | MIT |
 | **Node.js Engine** | `>=18.0.0` (LTS 18, 20, 22, 24) |
 | **TypeScript Types** | Built-in (`dist/index.d.ts`) |
