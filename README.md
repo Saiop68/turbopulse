@@ -3,6 +3,7 @@
 Fast, zero-copy distributed rate limiter and background job queue for Node.js, backed by native Rust (`napi-rs`) and Redis.
 
 [![CI](https://github.com/Saiop68/turbopulse/actions/workflows/CI.yml/badge.svg)](https://github.com/Saiop68/turbopulse/actions)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://Saiop68.github.io/turbopulse/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
