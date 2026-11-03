@@ -13,6 +13,7 @@ Fast, zero-copy distributed rate limiter and background job queue for Node.js, b
 - [Core Architecture](#core-architecture)
 - [Automatic Engine Capabilities](#automatic-engine-capabilities)
 - [Installation](#installation)
+- [Engine Modes & Factory Initialization](#engine-modes--factory-initialization)
 - [Rate Limiting Guide](#rate-limiting-guide)
   - [Basic Rate Limiting](#basic-rate-limiting)
   - [Non-Blocking & Pre-Flight Permits](#non-blocking--pre-flight-permits)
@@ -20,12 +21,13 @@ Fast, zero-copy distributed rate limiter and background job queue for Node.js, b
   - [Multi-Tier Chaining](#multi-tier-chaining)
   - [Multi-Tenant Rate Limiter Groups](#multi-tenant-rate-limiter-groups)
   - [High-Frequency Leased Limiter (L1/L2)](#high-frequency-leased-limiter-l1l2)
+  - [Limiter Events & Execution Metrics](#limiter-events--execution-metrics)
 - [Distributed Job Queue Guide](#distributed-job-queue-guide)
   - [Queues](#queues)
   - [Workers](#workers)
-  - [Job Lifecycle & Progress](#job-lifecycle--progress)
+  - [Job Lifecycle & Mutation](#job-lifecycle--mutation)
   - [Hierarchical DAG Workflows](#hierarchical-dag-workflows-flowproducer)
-  - [Queue Events](#queue-events)
+  - [Queue Events & Distributed RPC Waiting](#queue-events--distributed-rpc-waiting)
 - [Benchmarks & Performance Specs](#benchmarks--performance-specs)
   - [Hardware Testbeds](#test-environments--hardware-specs)
   - [Rate Limiter Comparison](#1-rate-limiting-legacy-pure-js-limiter-vs-turbopulse)
@@ -36,6 +38,8 @@ Fast, zero-copy distributed rate limiter and background job queue for Node.js, b
   - [LimiterOptions](#limiteroptions)
   - [QueueJobOptions](#queuejoboptions)
   - [WorkerOptions](#workeroptions)
+  - [EngineConfig & Core Types](#engineconfig--core-types)
+  - [Error Classes](#error-classes)
 - [Event Loop & Production Guarantees](#event-loop--production-guarantees)
 - [Development & Testing](#development--testing)
 - [License](#license)
@@ -100,6 +104,39 @@ Pre-compiled platform binaries are bundled out of the box:
 - **Windows:** x86_64
 
 No local Rust toolchain or compilation dependencies are required.
+
+---
+
+## Engine Modes & Factory Initialization
+
+TurboPulse can be used directly through high-level classes (`new RateLimiter()`, `new Queue()`) or managed via the centralized `TurboPulse` factory for shared connection pools:
+
+```typescript
+import { createTurboPulse, createInMemoryTurboPulse, EngineMode } from 'turbopulse';
+
+// 1. Asynchronous Redis engine with pooled connections
+const redisEngine = await createTurboPulse({
+  mode: EngineMode.Redis,
+  redisUrl: 'redis://127.0.0.1:6379',
+  keyPrefix: 'turbopulse',
+  redisPoolSize: 10,
+});
+
+// Create limiters and queues sharing the engine connection pool:
+const limiter = redisEngine.createRateLimiter({
+  capacity: 1000,
+  refillRate: 1000,
+  refillIntervalMs: 1000,
+}, 'gateway');
+
+const queue = redisEngine.createQueue('transcoding');
+
+// 2. Synchronous local In-Memory engine (zero external dependencies)
+const localEngine = createInMemoryTurboPulse();
+const localLimiter = localEngine.createRateLimiter({ capacity: 50 });
+```
+
+TurboPulse automatically normalizes Redis targets from raw URLs, existing `ioredis` instances, `node-redis` clients, or options objects (`{ host, port, password, tls }`).
 
 ---
 
@@ -244,6 +281,30 @@ const permit = await leasedLimiter.acquire(1);
 
 ---
 
+### Limiter Events & Execution Metrics
+
+The `RateLimiter` class extends Node.js `EventEmitter` to surface real-time events and queue metrics:
+
+```typescript
+// Operational lifecycle events
+limiter.on('idle', () => console.log('Limiter is fully idle'));
+limiter.on('empty', () => console.log('Waiting queue has drained'));
+limiter.on('depleted', (res) => console.warn(`Tokens exhausted. Wait: ${res.retryAfterMs}ms`));
+limiter.on('dropped', (task) => console.warn(`Task ${task.id} dropped by shedding strategy`));
+limiter.on('error', (err) => console.error('Limiter error:', err));
+
+// Real-time queue counters
+const stats = limiter.counts();
+console.log({
+  executing: stats.EXECUTING, // Current active running operations
+  queued: stats.QUEUED,       // Pending in queue
+  done: stats.DONE,           // Completed successfully
+  failed: stats.FAILED,       // Rejected or failed
+});
+```
+
+---
+
 ## Distributed Job Queue Guide
 
 ### Queues
@@ -372,23 +433,37 @@ await flow.add({
 
 ---
 
-### Queue Events
+### Queue Events & Distributed RPC Waiting
 
-Listen to events across distributed worker processes:
+The `QueueEvents` class streams real-time notifications from distributed worker processes and supports asynchronous waiting for remote task completion:
 
 ```typescript
-import { QueueEvents } from 'turbopulse';
+import { Queue, QueueEvents } from 'turbopulse';
 
-const events = new QueueEvents('transcode', {
-  connection: { host: '127.0.0.1', port: 6379 },
-});
+const queue = new Queue('reports', { connection: { host: '127.0.0.1', port: 6379 } });
+const events = new QueueEvents('reports', { connection: { host: '127.0.0.1', port: 6379 } });
 
+// Distributed RPC pattern: enqueue task and suspend until remote worker completes
+async function generateReportSync(userId: string) {
+  const job = await queue.add('generatePdf', { userId });
+
+  // Awaits worker completion across the cluster and retrieves result
+  const pdfUrl = await events.waitForJob(job.id, 'completed', 30000);
+  return pdfUrl;
+}
+
+// Global cluster event streaming
 events.on('completed', ({ jobId, returnvalue }) => {
-  console.log(`Job ${jobId} finished with:`, returnvalue);
+  console.log(`Job #${jobId} completed:`, returnvalue);
 });
 
-// Await completion of a specific job
-const result = await events.waitForJob('job_id_123', 10000);
+events.on('failed', ({ jobId, failedReason }) => {
+  console.error(`Job #${jobId} failed:`, failedReason);
+});
+
+events.on('progress', ({ jobId, data }) => {
+  console.log(`Job #${jobId} progress:`, data);
+});
 ```
 
 ---
@@ -531,6 +606,26 @@ npx ts-node test/realworld_workload_simulation.ts
 | `stalledInterval` | `number` | `30000` | Interval in milliseconds between background stalled recovery scans. |
 | `maxStalledCount` | `number` | `3` | Maximum times a stalled job is recovered before failing permanently. |
 | `limiter` | `{ max, duration }` | `undefined` | Integrated rate limit applied to worker job dispatching. |
+
+### `EngineConfig` & Core Types
+
+| Interface / Type | Definition | Description |
+| :--- | :--- | :--- |
+| `EngineConfig` | `{ mode: EngineMode, redisUrl?: string, redisPoolSize?: number, keyPrefix?: string }` | Configuration for `createTurboPulse(config)`. |
+| `JobCounts` | `{ waiting: number, active: number, delayed: number, completed: number, failed: number }` | Returned by `queue.getJobCounts()`. |
+| `Ticket` | `{ id: string, allowed: boolean, remaining?: number, retryAfterMs?: number, release(): Promise<void> }` | Returned by `limiter.tryTicket()` and `limiter.getTicket()`. |
+| `FlowJob` | `{ name: string, queueName: string, data?: any, opts?: QueueJobOptions, children?: FlowJob[] }` | Input tree for `flowProducer.add()`. |
+
+### Error Classes
+
+TurboPulse exports standard TypeScript error classes for programmatic error handling:
+
+| Class | Properties | Description |
+| :--- | :--- | :--- |
+| `TurboPulseError` | `message` | Base class for all TurboPulse operational errors. |
+| `RateLimitExceededError` | `key`, `retryAfterMs` | Thrown when rate limit capacity is exceeded and drop strategy rejects the task. |
+| `ConcurrencyLimitError` | `key`, `maxConcurrent` | Thrown when concurrency limit is reached in non-queued checks. |
+| `JobTimeoutError` | `jobId`, `timeoutMs` | Thrown when job execution duration exceeds configured `timeout` limit. |
 
 ---
 

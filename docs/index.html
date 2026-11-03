@@ -46,25 +46,29 @@
           <li><a href="#core-concepts" class="sidebar-link">Core Concepts</a></li>
           <li><a href="#installation" class="sidebar-link">Installation</a></li>
           <li><a href="#quickstart" class="sidebar-link">Quickstart</a></li>
+          <li><a href="#engine-factory" class="sidebar-link">Engine Modes & Factory</a></li>
         </ul>
       </div>
 
       <div class="sidebar-group">
         <div class="sidebar-title">Rate Limiting</div>
         <ul class="sidebar-links">
-          <li><a href="#rate-limiting-basics" class="sidebar-link">RateLimiter</a></li>
+          <li><a href="#rate-limiting-basics" class="sidebar-link">RateLimiter API</a></li>
           <li><a href="#tickets-middleware" class="sidebar-link">Non-Blocking Tickets</a></li>
+          <li><a href="#reservoirs-chaining" class="sidebar-link">Reservoirs & Chaining</a></li>
           <li><a href="#multi-tenant-groups" class="sidebar-link">Multi-Tenant Groups</a></li>
           <li><a href="#leased-limiter" class="sidebar-link">Two-Tier Leased Limiter</a></li>
+          <li><a href="#limiter-events" class="sidebar-link">Limiter Events & Metrics</a></li>
         </ul>
       </div>
 
       <div class="sidebar-group">
         <div class="sidebar-title">Job Queues & Workers</div>
         <ul class="sidebar-links">
-          <li><a href="#queues" class="sidebar-link">Queues</a></li>
-          <li><a href="#workers" class="sidebar-link">Workers</a></li>
+          <li><a href="#queues" class="sidebar-link">Queue Management</a></li>
+          <li><a href="#workers" class="sidebar-link">Workers & Concurrency</a></li>
           <li><a href="#job-lifecycle" class="sidebar-link">Job Lifecycle & State</a></li>
+          <li><a href="#queue-events" class="sidebar-link">QueueEvents & RPC Waiting</a></li>
           <li><a href="#dag-flows" class="sidebar-link">Workflows & DAGs</a></li>
         </ul>
       </div>
@@ -81,7 +85,11 @@
       <div class="sidebar-group">
         <div class="sidebar-title">Reference</div>
         <ul class="sidebar-links">
-          <li><a href="#api-reference" class="sidebar-link">Configuration Options</a></li>
+          <li><a href="#ref-errors" class="sidebar-link">Error Classes</a></li>
+          <li><a href="#ref-limiter-options" class="sidebar-link">LimiterOptions</a></li>
+          <li><a href="#ref-queue-job-options" class="sidebar-link">QueueJobOptions</a></li>
+          <li><a href="#ref-worker-options" class="sidebar-link">WorkerOptions</a></li>
+          <li><a href="#ref-engine-config" class="sidebar-link">EngineConfig & Types</a></li>
           <li><a href="#license" class="sidebar-link">License</a></li>
         </ul>
       </div>
@@ -208,14 +216,60 @@ await emailQueue.add('welcomeEmail', { to: 'user@example.com' });</code></pre>
         </div>
       </section>
 
-      <!-- Section: Rate Limiting In-Depth -->
-      <section id="rate-limiting-basics" class="section">
-        <h2>RateLimiter API</h2>
-        <p>The <code>RateLimiter</code> class controls concurrency limits, spacing, token reservoirs, and load shedding strategies.</p>
+      <!-- Section: Engine Factory -->
+      <section id="engine-factory" class="section">
+        <h2>Engine Modes & Factory</h2>
+        <p>TurboPulse can be used directly via high-level classes (<code>new RateLimiter()</code>, <code>new Queue()</code>) or instantiated through the low-level <code>TurboPulse</code> factory for centralized resource pooling.</p>
+
+        <h3>Available Engine Modes</h3>
+        <ul>
+          <li><code>EngineMode.InMemory</code>: Operates entirely inside compiled Rust heap memory with lock-free concurrent hash maps. Zero external dependencies, ideal for single-instance applications, unit tests, and CLI tools.</li>
+          <li><code>EngineMode.Redis</code>: Executes atomic Lua scripts across distributed Redis instances or Redis clusters, guaranteeing multi-node consistency.</li>
+        </ul>
 
         <div class="code-container">
           <div class="code-header">
-            <span>limiter_config.ts</span>
+            <span>engine_factory.ts</span>
+            <button class="btn-copy">Copy</button>
+          </div>
+          <pre><code class="language-typescript">import { createTurboPulse, createInMemoryTurboPulse, EngineMode } from 'turbopulse';
+
+// 1. Asynchronous Redis initialization
+const redisEngine = await createTurboPulse({
+  mode: EngineMode.Redis,
+  redisUrl: 'redis://127.0.0.1:6379',
+  keyPrefix: 'my_app',
+  redisPoolSize: 10,
+});
+
+// Create limiters and queues sharing the engine's connection pool
+const limiter = redisEngine.createRateLimiter({
+  capacity: 1000,
+  refillRate: 1000,
+  refillIntervalMs: 1000,
+}, 'api_gateway');
+
+const queue = redisEngine.createQueue('transcoding');
+
+// 2. Synchronous local In-Memory engine
+const localEngine = createInMemoryTurboPulse();
+const localLimiter = localEngine.createRateLimiter({ capacity: 50 });</code></pre>
+        </div>
+
+        <p>TurboPulse automatically normalizes Redis targets from raw URLs, existing <code>ioredis</code> clients, <code>node-redis</code> instances, or plain connection options (<code>{ host, port, password, tls }</code>).</p>
+      </section>
+
+      <!-- Section: Rate Limiting In-Depth -->
+      <section id="rate-limiting-basics" class="section">
+        <h2>RateLimiter API</h2>
+        <p>The <code>RateLimiter</code> class controls concurrency limits, execution spacing, token reservoirs, and load shedding strategies.</p>
+
+        <h3>1. Priority Scheduling & Job Options</h3>
+        <p>Jobs can specify priority (0 = highest priority, 9 = lowest priority), token weight, and execution deadlines:</p>
+
+        <div class="code-container">
+          <div class="code-header">
+            <span>limiter_scheduling.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { RateLimiter } from 'turbopulse';
@@ -231,16 +285,48 @@ const limiter = new RateLimiter({
   rejectOnDrop: true,                 // Reject promise with Error on dropped tasks
 });
 
-// Wrapping existing functions:
-const safeFetch = limiter.wrap(fetch);
-const response = await safeFetch('https://api.example.com/data');</code></pre>
+// High-priority task with custom token weight and 5s expiration deadline
+const result = await limiter.schedule(
+  {
+    priority: 0,        // Highest priority
+    weight: 2,          // Consumes 2 tokens from reservoir
+    expiration: 5000,   // Fails if waiting longer than 5000ms
+    id: 'charge_req_42'
+  },
+  async () => {
+    return await chargeCreditCard();
+  }
+);
+
+// Wrapping functions:
+const safeFetch = limiter.wrap(fetch, { priority: 2 });
+const response = await safeFetch('https://api.example.com/data');
+
+// Node.js callback-style execution:
+limiter.submit(
+  async (cb) => {
+    const data = await readDatabase();
+    cb(null, data);
+  },
+  (err, data) => {
+    if (err) console.error(err);
+  }
+);</code></pre>
         </div>
+
+        <h3>2. Shedding Strategies</h3>
+        <p>When the waiting queue depth reaches <code>highWater</code>, TurboPulse executes one of three strategies:</p>
+        <ul>
+          <li><code>RateLimiter.strategy.LEAK</code> (Default): Drops the lowest-priority waiting task in the queue to make room for the new task.</li>
+          <li><code>RateLimiter.strategy.OVERFLOW</code>: Immediately drops the incoming task without touching already queued tasks.</li>
+          <li><code>RateLimiter.strategy.BLOCK</code>: Empties and rejects all currently queued tasks and rejects all incoming tasks until traffic ceases.</li>
+        </ul>
       </section>
 
       <!-- Section: Tickets & Middleware -->
       <section id="tickets-middleware" class="section">
         <h2>Non-Blocking Tickets & Middleware</h2>
-        <p>In web servers (Express, Fastify), you often need to permit or reject incoming requests immediately without queueing them up:</p>
+        <p>In HTTP frameworks (Express, Fastify, Next.js), you often need to verify rate limits and concurrency instantly without holding the request in an internal queue.</p>
 
         <div class="code-container">
           <div class="code-header">
@@ -252,35 +338,107 @@ import { RateLimiter } from 'turbopulse';
 
 const app = express();
 const limiter = new RateLimiter({
-  reservoir: 50,
-  reservoirRefreshInterval: 1000,
-  maxConcurrent: 10,
+  reservoir: 100,
+  reservoirRefreshInterval: 60000,
+  maxConcurrent: 20,
 });
 
 app.use('/api', async (req, res, next) => {
+  // 1. Non-blocking ticket evaluation
   const ticket = await limiter.tryTicket(1);
   
   if (!ticket.allowed) {
-    res.setHeader('Retry-After', Math.ceil(ticket.retryAfterMs / 1000));
+    res.setHeader('Retry-After', Math.ceil((ticket.retryAfterMs || 1000) / 1000));
     return res.status(429).json({
       error: 'Too Many Requests',
       retryAfterMs: ticket.retryAfterMs,
     });
   }
 
+  // 2. Guaranteed concurrency release on response termination
   res.on('finish', async () => {
-    await ticket.release();
+    await ticket.release(); // Decrements active concurrency slot
   });
 
   next();
+});
+
+// Peeking token availability without consuming:
+const hasQuota = await limiter.check(1); // true if 1 token available, false otherwise</code></pre>
+        </div>
+
+        <p>For operations that should pause and wait in line until capacity is free, use <code>await limiter.getTicket(weight)</code>, which suspends execution until permits become available.</p>
+      </section>
+
+      <!-- Section: Reservoirs & Chaining -->
+      <section id="reservoirs-chaining" class="section">
+        <h2>Reservoirs & Chaining</h2>
+
+        <h3>1. Dynamic Reservoir Inspection & Mutation</h3>
+        <p>Inspect or modify the current token budget in real time without restarting the limiter:</p>
+        <div class="code-container">
+          <div class="code-header">
+            <span>reservoir_mutation.ts</span>
+            <button class="btn-copy">Copy</button>
+          </div>
+          <pre><code class="language-typescript">const currentTokens = await limiter.currentReservoir();
+console.log('Available tokens:', currentTokens);
+
+// Manually grant bonus tokens or credit
+await limiter.incrementReservoir(50);
+
+// Dynamically update limiter options at runtime
+limiter.updateSettings({
+  maxConcurrent: 10,
+  minTime: 10,
 });</code></pre>
+        </div>
+
+        <h3>2. Multi-Tier Limiter Chaining</h3>
+        <p>Enforce multiple independent constraints simultaneously (for instance, limiting an external integration to <strong>10 requests per second</strong> AND <strong>500 requests per minute</strong>):</p>
+        <div class="code-container">
+          <div class="code-header">
+            <span>limiter_chaining.ts</span>
+            <button class="btn-copy">Copy</button>
+          </div>
+          <pre><code class="language-typescript">import { RateLimiter } from 'turbopulse';
+
+// Tier 1: Per-second smoothing
+const perSecondLimiter = new RateLimiter({
+  reservoir: 10,
+  reservoirRefreshAmount: 10,
+  reservoirRefreshInterval: 1000,
+});
+
+// Tier 2: Per-minute hard ceiling
+const perMinuteLimiter = new RateLimiter({
+  reservoir: 500,
+  reservoirRefreshAmount: 500,
+  reservoirRefreshInterval: 60 * 1000,
+});
+
+// Chain: perSecondLimiter requires perMinuteLimiter approval before execution
+perSecondLimiter.chain(perMinuteLimiter);
+
+// Scheduling via perSecondLimiter now satisfies BOTH constraints automatically
+await perSecondLimiter.schedule(() => callThirdPartyApi());</code></pre>
+        </div>
+
+        <h3>3. Graceful Shutdown</h3>
+        <div class="code-container">
+          <div class="code-header">
+            <span>shutdown.ts</span>
+            <button class="btn-copy">Copy</button>
+          </div>
+          <pre><code class="language-typescript">// Stops the limiter and drops pending queue items with an Error
+await limiter.stop({ dropWaitingJobs: true, enqueueErrorMessage: 'Limiter stopped for deployment' });</code></pre>
         </div>
       </section>
 
       <!-- Section: Multi-Tenant Groups -->
       <section id="multi-tenant-groups" class="section">
         <h2>Multi-Tenant Groups</h2>
-        <p>Isolate rate limits per user, route, or API key with shared base configuration:</p>
+        <p>Isolate rate limits per user, organization, or API key with shared base configuration:</p>
 
         <div class="code-container">
           <div class="code-header">
@@ -296,7 +454,7 @@ const group = new RateLimiter.Group({
   reservoirRefreshInterval: 60000,
 });
 
-// Calling .schedule(id, fn) automatically creates an isolated limiter on first access
+// Calling .schedule(id, fn) provisions an isolated limiter on first access
 async function handleUserApiCall(userId: string) {
   return await group.schedule(userId, async () => {
     return await executeQuery(userId);
@@ -304,15 +462,21 @@ async function handleUserApiCall(userId: string) {
 }
 
 // User A's traffic spike has zero impact on User B
-handleUserApiCall('user_A');
-handleUserApiCall('user_B');</code></pre>
+handleUserApiCall('org_stripe');
+handleUserApiCall('org_github');
+
+// Direct instance management:
+const orgLimiter = group.key('org_stripe');       // Access or instantiate instance
+const activeKeys = group.limiters();              // Returns array of all active tenant keys
+await group.deleteKey('org_stripe');              // Stops limiter and removes key
+group.cleanup(300000);                            // Evicts idle tenant limiters older than 5 minutes</code></pre>
         </div>
       </section>
 
       <!-- Section: Leased Limiter -->
       <section id="leased-limiter" class="section">
         <h2>Two-Tier Leased Limiter (L1 / L2)</h2>
-        <p>Standard rate limiters issue a network roundtrip to Redis for every token, bounding single-thread throughput to ~20,000 ops/sec due to TCP network latency.</p>
+        <p>Standard distributed rate limiters issue a network roundtrip to Redis for every token check, bounding single-thread throughput to ~20,000 ops/sec due to TCP network latency.</p>
         <p>TurboPulse provides a <strong>Two-Tier L1/L2 Leased Architecture</strong> to achieve <strong>2,000,000+ ops/sec</strong> against Redis:</p>
 
         <div class="code-container">
@@ -341,13 +505,45 @@ const leasedLimiter = engine.createLeasedRateLimiter(
 );
 
 // Served from local CPU registers in 250 nanoseconds
-const permit = await leasedLimiter.acquire(1);</code></pre>
+const permit = await leasedLimiter.acquire(1);
+
+// Ultra-fast zero-overhead synchronous check:
+if (leasedLimiter.acquireFast(1)) {
+  // Executed with sub-microsecond latency
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- Section: Limiter Events & Metrics -->
+      <section id="limiter-events" class="section">
+        <h2>Limiter Events & Metrics</h2>
+        <p>The <code>RateLimiter</code> class extends Node.js <code>EventEmitter</code> and emits fine-grained operational events:</p>
+
+        <div class="code-container">
+          <div class="code-header">
+            <span>limiter_events.ts</span>
+            <button class="btn-copy">Copy</button>
+          </div>
+          <pre><code class="language-typescript">limiter.on('idle', () => console.log('Limiter is fully idle (queue and concurrency are 0)'));
+limiter.on('empty', () => console.log('Waiting queue has emptied'));
+limiter.on('depleted', (res) => console.warn(`Tokens exhausted. Wait time: ${res.retryAfterMs}ms`));
+limiter.on('dropped', (task) => console.warn(`Task ${task.id} dropped by strategy`));
+limiter.on('error', (err) => console.error('Limiter error:', err));
+
+// Inspect real-time execution metrics:
+const counts = limiter.counts();
+console.log({
+  executing: counts.EXECUTING, // Currently running
+  queued: counts.QUEUED,       // Waiting in queue
+  done: counts.DONE,           // Total completed
+  failed: counts.FAILED,       // Total failed
+});</code></pre>
         </div>
       </section>
 
       <!-- Section: Queues -->
       <section id="queues" class="section">
-        <h2>Queue Operations</h2>
+        <h2>Queue Operations & Management</h2>
 
         <div class="code-container">
           <div class="code-header">
@@ -360,37 +556,49 @@ const queue = new Queue('transcode', {
   connection: { host: '127.0.0.1', port: 6379 },
 });
 
-// Enqueue with options
+await queue.waitUntilReady();
+
+// 1. Enqueue job with advanced options
 const job = await queue.add(
   'encodeJob', 
-  { file: 'video.mp4' }, 
+  { file: 'video.mp4', resolution: '1080p' }, 
   {
     priority: 10,                                              // Higher number = higher priority
     delay: 5000,                                               // Delay execution by 5000ms
     attempts: 4,                                               // Max retry attempts on failure
     backoff: { type: 'exponential', delay: 1000, jitter: true },// Exponential retry backoff
     deduplication: { id: 'file_video_mp4' },                   // Deduplication key
+    timeout: 60000,                                            // Job timeout limit in ms
+    removeOnComplete: true,                                    // Auto-cleanup on success
   }
 );
 
-// Atomic bulk enqueue
-await queue.addBulk([
+// 2. Atomic bulk enqueue
+const batchJobs = await queue.addBulk([
   { name: 'taskA', data: { id: 1 }, opts: { priority: 5 } },
   { name: 'taskB', data: { id: 2 }, opts: { priority: 1 } },
 ]);
 
-// Maintenance
+// 3. Queue inspection & dashboard metrics
+const counts = await queue.getJobCounts();
+console.log(`Waiting: ${counts.waiting}, Active: ${counts.active}, Delayed: ${counts.delayed}, Failed: ${counts.failed}`);
+
+// 4. Lifecycle controls
 await queue.pause();
+console.log('Is queue paused:', await queue.isPaused());
 await queue.resume();
-await queue.clean(60000, 1000, 'completed');
-await queue.drain();
-await queue.obliterate();</code></pre>
+
+// 5. Maintenance & Pruning
+await queue.clean(60000, 1000, 'completed'); // Clean completed jobs older than 60s
+await queue.drain();                         // Empties waiting queue
+await queue.obliterate();                    // Completely purges all queue data
+await queue.close();                         // Releases connections</code></pre>
         </div>
       </section>
 
       <!-- Section: Workers -->
       <section id="workers" class="section">
-        <h2>Workers & Processors</h2>
+        <h2>Workers & Concurrency</h2>
 
         <div class="code-container">
           <div class="code-header">
@@ -416,37 +624,102 @@ const worker = new Worker(
     concurrency: 8,                         // 8 parallel execution slots
     limiter: { max: 100, duration: 1000 },  // Rate limit worker execution
     lockDuration: 30000,                    // 30s lock before treated as stalled
+    lockRenewTime: 15000,                   // Heartbeat renews lock every 15s
     stalledInterval: 30000,                 // Stalled job recovery heartbeat
+    maxStalledCount: 3,                     // Max recovery attempts before permanent failure
   }
 );
 
-worker.on('active', (job) => console.log(`Job ${job.id} active`));
-worker.on('completed', (job, result) => console.log(`Job ${job.id} done:`, result));
-worker.on('failed', (job, err) => console.error(`Job ${job.id} failed:`, err.message));
-worker.on('stalled', (count) => console.warn(`Recovered ${count} stalled jobs`));</code></pre>
+// Worker lifecycle events:
+worker.on('active', (job) => console.log(`Job #${job.id} is now active`));
+worker.on('completed', (job, result) => console.log(`Job #${job.id} completed:`, result));
+worker.on('failed', (job, err) => console.error(`Job #${job.id} failed:`, err.message));
+worker.on('stalled', (count) => console.warn(`Recovered ${count} stalled jobs`));
+worker.on('drained', () => console.log('All queue items processed'));
+worker.on('error', (err) => console.error('Worker error:', err));
+
+// Lifecycle management:
+await worker.pause();
+console.log('Worker paused:', worker.isPaused());
+await worker.resume();
+await worker.close(); // Gracefully waits for active jobs to finish before closing</code></pre>
         </div>
       </section>
 
       <!-- Section: Job Lifecycle -->
       <section id="job-lifecycle" class="section">
         <h2>Job Lifecycle & State</h2>
-        
+        <p>The <code>Job</code> instance represents an individual work payload with progress tracking, state checks, and payload mutation capabilities.</p>
+
         <div class="code-container">
           <div class="code-header">
-            <span>job_state.ts</span>
+            <span>job_lifecycle.ts</span>
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">const job = await queue.getJob('job_123');
 
 if (job) {
+  // State inspection:
   const state = await job.getState(); // 'waiting' | 'active' | 'completed' | 'failed' | 'delayed'
-  console.log(`Progress: ${job.progress}%`);
-  console.log(`Attempts: ${job.attemptsMade}`);
-  console.log(`Return value:`, job.returnValue);
+  const isDone = await job.isCompleted();
+  const isFailed = await job.isFailed();
 
-  await job.promote(); // Promotes delayed job to waiting queue immediately
-  await job.discard(); // Fails the job permanently without further retries
+  // Properties:
+  console.log(`Job ID: ${job.id}`);
+  console.log(`Created at: ${new Date(job.timestamp).toISOString()}`);
+  console.log(`Attempts made: ${job.attemptsMade}`);
+  console.log(`Progress: ${job.progress}%`);
+  console.log(`Result:`, job.returnValue);
+
+  // In-flight mutations & logging:
+  await job.updateProgress(75);
+  await job.updateData({ ...job.data, status: 'step_2_completed' });
+  await job.log('Step 2 validation succeeded');
+
+  // Manual scheduling overrides:
+  await job.promote(); // Immediately promotes delayed job to waiting queue
+  await job.retry();   // Re-enqueues failed job
+  await job.discard(); // Permanently fails the job without further retries
 }</code></pre>
+        </div>
+      </section>
+
+      <!-- Section: QueueEvents & RPC Waiting -->
+      <section id="queue-events" class="section">
+        <h2>QueueEvents & RPC Waiting</h2>
+        <p>The <code>QueueEvents</code> class listens to distributed job state changes across remote worker nodes. It enables the <strong>distributed RPC pattern</strong> where an API gateway enqueues a job and suspends until the background worker finishes processing.</p>
+
+        <div class="code-container">
+          <div class="code-header">
+            <span>queue_events_rpc.ts</span>
+            <button class="btn-copy">Copy</button>
+          </div>
+          <pre><code class="language-typescript">import { Queue, QueueEvents } from 'turbopulse';
+
+const queue = new Queue('reports', { connection: { host: '127.0.0.1', port: 6379 } });
+const queueEvents = new QueueEvents('reports', { connection: { host: '127.0.0.1', port: 6379 } });
+
+// Distributed RPC pattern:
+async function generateReportSync(userId: string) {
+  const job = await queue.add('generatePdf', { userId });
+
+  // Suspends until remote worker finishes and returns the job's return value
+  const pdfUrl = await queueEvents.waitForJob(job.id, 'completed', 30000);
+  return pdfUrl;
+}
+
+// Global queue event streaming:
+queueEvents.on('completed', ({ jobId, returnvalue }) => {
+  console.log(`Remote job ${jobId} finished with result:`, returnvalue);
+});
+
+queueEvents.on('failed', ({ jobId, failedReason }) => {
+  console.error(`Remote job ${jobId} failed:`, failedReason);
+});
+
+queueEvents.on('progress', ({ jobId, data }) => {
+  console.log(`Remote job ${jobId} reported progress:`, data);
+});</code></pre>
         </div>
       </section>
 
@@ -666,8 +939,48 @@ await flow.add({
         </ol>
       </section>
 
-      <!-- Section: API Reference -->
-      <section id="api-reference" class="section">
+      <!-- Section: Error Classes -->
+      <section id="ref-errors" class="section">
+        <h2>Error Classes</h2>
+        <p>TurboPulse exports strongly-typed error classes extending <code>TurboPulseError</code> for programmatic error handling:</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Error Class</th>
+                <th>Properties</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>TurboPulseError</code></td>
+                <td><code>message</code></td>
+                <td>Base error class for all internal TurboPulse operational errors.</td>
+              </tr>
+              <tr>
+                <td><code>RateLimitExceededError</code></td>
+                <td><code>key</code>, <code>retryAfterMs</code></td>
+                <td>Thrown when rate capacity is exceeded and drop strategy rejects the task.</td>
+              </tr>
+              <tr>
+                <td><code>ConcurrencyLimitError</code></td>
+                <td><code>key</code>, <code>maxConcurrent</code></td>
+                <td>Thrown when parallel execution limit is reached in non-queued checks.</td>
+              </tr>
+              <tr>
+                <td><code>JobTimeoutError</code></td>
+                <td><code>jobId</code>, <code>timeoutMs</code></td>
+                <td>Thrown when a job execution exceeds its configured <code>timeout</code> limit.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section: API Reference - LimiterOptions -->
+      <section id="ref-limiter-options" class="section">
         <h2>Configuration Reference</h2>
 
         <h3><code>LimiterOptions</code></h3>
@@ -713,6 +1026,24 @@ await flow.add({
                 <td>Duration of the refresh window in milliseconds.</td>
               </tr>
               <tr>
+                <td><code>reservoirIncreaseAmount</code></td>
+                <td><code>number</code></td>
+                <td><code>undefined</code></td>
+                <td>Amount added to reservoir at each increment interval.</td>
+              </tr>
+              <tr>
+                <td><code>reservoirIncreaseInterval</code></td>
+                <td><code>number</code></td>
+                <td><code>undefined</code></td>
+                <td>Interval in ms between automatic reservoir increments.</td>
+              </tr>
+              <tr>
+                <td><code>reservoirIncreaseMaximum</code></td>
+                <td><code>number</code></td>
+                <td><code>undefined</code></td>
+                <td>Ceiling cap for reservoir increments.</td>
+              </tr>
+              <tr>
                 <td><code>highWater</code></td>
                 <td><code>number</code></td>
                 <td><code>undefined</code></td>
@@ -720,9 +1051,9 @@ await flow.add({
               </tr>
               <tr>
                 <td><code>strategy</code></td>
-                <td><code>Strategy</code></td>
+                <td><code>RateLimiterStrategy</code></td>
                 <td><code>LEAK</code></td>
-                <td>Drop strategy: <code>LEAK</code>, <code>OVERFLOW</code>, <code>BLOCK</code>.</td>
+                <td>Drop strategy: <code>LEAK (0)</code>, <code>OVERFLOW (1)</code>, <code>BLOCK (2)</code>.</td>
               </tr>
               <tr>
                 <td><code>rejectOnDrop</code></td>
@@ -730,10 +1061,31 @@ await flow.add({
                 <td><code>true</code></td>
                 <td>When true, dropped tasks reject with Error.</td>
               </tr>
+              <tr>
+                <td><code>id</code></td>
+                <td><code>string</code></td>
+                <td><code>'default'</code></td>
+                <td>Unique rate limiter key identifier.</td>
+              </tr>
+              <tr>
+                <td><code>datastore</code></td>
+                <td><code>'local' | 'redis' | 'ioredis'</code></td>
+                <td><code>'local'</code></td>
+                <td>Storage backend type.</td>
+              </tr>
+              <tr>
+                <td><code>redisUrl</code></td>
+                <td><code>string</code></td>
+                <td><code>undefined</code></td>
+                <td>Redis connection string (e.g. <code>redis://127.0.0.1:6379</code>).</td>
+              </tr>
             </tbody>
           </table>
         </div>
+      </section>
 
+      <!-- Section: API Reference - QueueJobOptions -->
+      <section id="ref-queue-job-options" class="section">
         <h3><code>QueueJobOptions</code></h3>
         <div class="table-wrap">
           <table>
@@ -746,6 +1098,12 @@ await flow.add({
               </tr>
             </thead>
             <tbody>
+              <tr>
+                <td><code>jobId</code></td>
+                <td><code>string</code></td>
+                <td><code>UUID v4</code></td>
+                <td>Custom unique identifier for the job.</td>
+              </tr>
               <tr>
                 <td><code>priority</code></td>
                 <td><code>number</code></td>
@@ -766,15 +1124,156 @@ await flow.add({
               </tr>
               <tr>
                 <td><code>backoff</code></td>
-                <td><code>BackoffOpts</code></td>
+                <td><code>number | BackoffOpts</code></td>
                 <td><code>exponential</code></td>
-                <td>Retry delay strategy: <code>exponential</code>, <code>fixed</code>, <code>linear</code>.</td>
+                <td>Retry delay strategy: <code>{ type: 'fixed' | 'exponential' | 'linear', delay: 1000, maxDelay: 60000, jitter: true }</code>.</td>
+              </tr>
+              <tr>
+                <td><code>timeout</code></td>
+                <td><code>number</code></td>
+                <td><code>30000</code></td>
+                <td>Execution timeout limit in milliseconds.</td>
+              </tr>
+              <tr>
+                <td><code>lifo</code></td>
+                <td><code>boolean</code></td>
+                <td><code>false</code></td>
+                <td>If true, pushes job to front of queue (Last In, First Out).</td>
+              </tr>
+              <tr>
+                <td><code>removeOnComplete</code></td>
+                <td><code>boolean | number</code></td>
+                <td><code>false</code></td>
+                <td>If true, deletes job record immediately upon successful completion.</td>
+              </tr>
+              <tr>
+                <td><code>removeOnFail</code></td>
+                <td><code>boolean | number</code></td>
+                <td><code>false</code></td>
+                <td>If true, deletes job record upon permanent failure.</td>
+              </tr>
+              <tr>
+                <td><code>repeat</code></td>
+                <td><code>{ every?: number, limit?: number }</code></td>
+                <td><code>undefined</code></td>
+                <td>Recurring cron / interval job schedule.</td>
               </tr>
               <tr>
                 <td><code>deduplication.id</code></td>
                 <td><code>string</code></td>
                 <td><code>undefined</code></td>
                 <td>Unique key preventing duplicate waiting jobs.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section: API Reference - WorkerOptions -->
+      <section id="ref-worker-options" class="section">
+        <h3><code>WorkerOptions</code></h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Property</th>
+                <th>Type</th>
+                <th>Default</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>concurrency</code></td>
+                <td><code>number</code></td>
+                <td><code>1</code></td>
+                <td>Number of parallel jobs processed concurrently.</td>
+              </tr>
+              <tr>
+                <td><code>limiter</code></td>
+                <td><code>{ max: number, duration: number }</code></td>
+                <td><code>undefined</code></td>
+                <td>Worker-level execution rate limiter.</td>
+              </tr>
+              <tr>
+                <td><code>lockDuration</code></td>
+                <td><code>number</code></td>
+                <td><code>30000</code></td>
+                <td>Lease lock duration (in ms) before an active job is considered stalled.</td>
+              </tr>
+              <tr>
+                <td><code>lockRenewTime</code></td>
+                <td><code>number</code></td>
+                <td><code>15000</code></td>
+                <td>Interval (in ms) to renew active job lock heartbeats.</td>
+              </tr>
+              <tr>
+                <td><code>stalledInterval</code></td>
+                <td><code>number</code></td>
+                <td><code>30000</code></td>
+                <td>Interval (in ms) to evaluate and recover stalled jobs.</td>
+              </tr>
+              <tr>
+                <td><code>maxStalledCount</code></td>
+                <td><code>number</code></td>
+                <td><code>3</code></td>
+                <td>Max recovery attempts before permanently failing a stalled job.</td>
+              </tr>
+              <tr>
+                <td><code>pollIntervalMs</code></td>
+                <td><code>number</code></td>
+                <td><code>20</code></td>
+                <td>Polling delay when queue is empty.</td>
+              </tr>
+              <tr>
+                <td><code>autoStart</code></td>
+                <td><code>boolean</code></td>
+                <td><code>true</code></td>
+                <td>Automatically starts the processing loop upon instantiation.</td>
+              </tr>
+              <tr>
+                <td><code>connection</code></td>
+                <td><code>any</code></td>
+                <td><code>undefined</code></td>
+                <td>Redis connection configuration or existing client.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section: API Reference - EngineConfig & Types -->
+      <section id="ref-engine-config" class="section">
+        <h3><code>EngineConfig</code> & Core Types</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Type / Interface</th>
+                <th>Definition</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>EngineConfig</code></td>
+                <td><code>{ mode: EngineMode, redisUrl?: string, redisPoolSize?: number, keyPrefix?: string }</code></td>
+                <td>Configuration for <code>createTurboPulse(config)</code>.</td>
+              </tr>
+              <tr>
+                <td><code>JobCounts</code></td>
+                <td><code>{ waiting: number, active: number, delayed: number, completed: number, failed: number }</code></td>
+                <td>Returned by <code>queue.getJobCounts()</code>.</td>
+              </tr>
+              <tr>
+                <td><code>Ticket</code></td>
+                <td><code>{ id: string, allowed: boolean, remaining?: number, retryAfterMs?: number, release(): Promise&lt;void&gt;, done(): Promise&lt;void&gt; }</code></td>
+                <td>Returned by <code>limiter.tryTicket()</code> and <code>limiter.getTicket()</code>.</td>
+              </tr>
+              <tr>
+                <td><code>FlowJob</code></td>
+                <td><code>{ name: string, queueName: string, data?: any, opts?: QueueJobOptions, children?: FlowJob[] }</code></td>
+                <td>Passed to <code>flowProducer.add(flow)</code>.</td>
               </tr>
             </tbody>
           </table>
