@@ -1,0 +1,44 @@
+# Rust Build Artifacts
+/target
+/target_build
+**/*.rs.bk
+*.pdb
+
+# Node & Package Managers
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Native Binaries (built on local machine or via CI/CD)
+*.node
+turbopulse.node
+turbopulse.*.node
+
+# Temporary, Scratch & Archives
+scratch/
+*.tar.gz
+*.tgz
+*.zip
+
+# Environment & Credentials
+.env
+.env.*
+*.pem
+*.key
+
+# Test Coverage & Logs
+coverage/
+.nyc_output/
+*.log
+
+# OS & IDE Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
