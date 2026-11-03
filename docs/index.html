@@ -136,15 +136,59 @@
 
       <!-- Section: Installation -->
       <section id="installation" class="section">
-        <h2>Installation</h2>
-        <p>Install via npm:</p>
+        <h2>Installation & Package Details</h2>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Property</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>NPM Package</strong></td>
+                <td><a href="https://www.npmjs.com/package/turbopulse" target="_blank" rel="noopener"><code>turbopulse</code></a></td>
+              </tr>
+              <tr>
+                <td><strong>Latest Version</strong></td>
+                <td><code>1.0.2</code> (dist-tag <code>latest</code>)</td>
+              </tr>
+              <tr>
+                <td><strong>Node Compatibility</strong></td>
+                <td><code>&gt;=18.0.0</code> (Node.js 18, 20, 22, 24)</td>
+              </tr>
+              <tr>
+                <td><strong>TypeScript Support</strong></td>
+                <td>Built-in definitions (<code>dist/index.d.ts</code>)</td>
+              </tr>
+              <tr>
+                <td><strong>Native ABI</strong></td>
+                <td>Pre-compiled Node-API (<code>napi-rs</code>)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>Install via your package manager of choice:</p>
         
         <div class="code-container">
           <div class="code-header">
             <span>bash</span>
             <button class="btn-copy">Copy</button>
           </div>
-          <pre><code class="language-bash">npm install turbopulse</code></pre>
+          <pre><code class="language-bash"># npm
+npm install turbopulse
+
+# pnpm
+pnpm add turbopulse
+
+# yarn
+yarn add turbopulse
+
+# bun
+bun add turbopulse</code></pre>
         </div>
 
         <p>Pre-compiled native binaries are bundled for:</p>

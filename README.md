@@ -2,6 +2,9 @@
 
 Fast, zero-copy distributed rate limiter and background job queue for Node.js, backed by native Rust (`napi-rs`) and Redis.
 
+[![npm version](https://img.shields.io/npm/v/turbopulse.svg?color=cb3837)](https://www.npmjs.com/package/turbopulse)
+[![npm downloads](https://img.shields.io/npm/dm/turbopulse.svg)](https://www.npmjs.com/package/turbopulse)
+[![Node.js Version](https://img.shields.io/node/v/turbopulse.svg)](https://nodejs.org)
 [![CI](https://github.com/Saiop68/turbopulse/actions/workflows/CI.yml/badge.svg)](https://github.com/Saiop68/turbopulse/actions)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://Saiop68.github.io/turbopulse/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -12,7 +15,7 @@ Fast, zero-copy distributed rate limiter and background job queue for Node.js, b
 
 - [Core Architecture](#core-architecture)
 - [Automatic Engine Capabilities](#automatic-engine-capabilities)
-- [Installation](#installation)
+- [Installation & NPM Package Details](#installation--npm-package-details)
 - [Engine Modes & Factory Initialization](#engine-modes--factory-initialization)
 - [Rate Limiting Guide](#rate-limiting-guide)
   - [Basic Rate Limiting](#basic-rate-limiting)
@@ -92,18 +95,42 @@ TurboPulse automates resilience, scheduling, and connection management without r
 
 ---
 
-## Installation
+## Installation & NPM Package Details
+
+| Property | Value |
+| :--- | :--- |
+| **NPM Package** | [`turbopulse`](https://www.npmjs.com/package/turbopulse) |
+| **Latest Release** | `1.0.2` (dist-tag `latest`) |
+| **License** | MIT |
+| **Node.js Engine** | `>=18.0.0` (LTS 18, 20, 22, 24) |
+| **TypeScript Types** | Built-in (`dist/index.d.ts`) |
+| **Native Runtime** | Pre-compiled via `napi-rs` (Node-API v8) |
+
+### Install via your package manager:
 
 ```bash
+# npm
 npm install turbopulse
+
+# pnpm
+pnpm add turbopulse
+
+# yarn
+yarn add turbopulse
+
+# bun
+bun add turbopulse
 ```
 
-Pre-compiled platform binaries are bundled out of the box:
-- **Linux:** x86_64, aarch64 (ARM64 / AWS Graviton), musl (Alpine Docker)
-- **macOS:** Apple Silicon (M1/M2/M3/M4), Intel x86_64
-- **Windows:** x86_64
+### Pre-compiled Native Platform Binaries
 
-No local Rust toolchain or compilation dependencies are required.
+TurboPulse bundles pre-compiled native binaries out of the box using Node-API (`napi-rs`):
+
+- **Linux:** `x86_64` (glibc), `aarch64` (ARM64 / AWS Graviton), `musl` (Alpine Linux Docker containers)
+- **macOS:** Apple Silicon (`aarch64-apple-darwin` M1/M2/M3/M4), Intel (`x86_64-apple-darwin`)
+- **Windows:** `x86_64` (`x86_64-pc-windows-msvc`)
+
+> **Zero Compilation Friction:** No local Rust toolchain, C++ compiler, `node-gyp`, or Python installation is required on your development machine or production deployment servers. The appropriate native binary is automatically selected and loaded at runtime.
 
 ---
 
