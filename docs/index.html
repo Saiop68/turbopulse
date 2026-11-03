@@ -16,7 +16,7 @@
       <button class="menu-toggle" id="menu-toggle" aria-label="Toggle Navigation">☰</button>
       <a href="#" class="brand">
         <span>turbopulse</span>
-        <span class="brand-badge">v1.0.0</span>
+        <span class="brand-badge">v1.0.2</span>
       </a>
     </div>
 
@@ -47,6 +47,7 @@
           <li><a href="#installation" class="sidebar-link">Installation</a></li>
           <li><a href="#quickstart" class="sidebar-link">Quickstart</a></li>
           <li><a href="#engine-factory" class="sidebar-link">Engine Modes & Factory</a></li>
+          <li><a href="#redis-cluster" class="sidebar-link">Datastore & Redis Cluster</a></li>
         </ul>
       </div>
 
@@ -264,15 +265,46 @@ const localLimiter = localEngine.createRateLimiter({ capacity: 50 });</code></pr
         <h2>Datastore Definition & Redis Cluster Support</h2>
         <p>TurboPulse provides native multi-backend storage support through compiled Rust:</p>
 
-        <ul>
-          <li><strong><code>local</code>:</strong> Compiled Rust lock-free concurrent DashMaps on the native heap. Sub-microsecond latency (<1µs), zero network overhead, zero GC pauses.</li>
-          <li><strong><code>redis</code>:</strong> Distributed standalone Redis or Sentinel with atomic Lua scripts.</li>
-          <li><strong><code>redis-cluster</code>:</strong> 100% native Redis Cluster with automatic Hash-Tag slot pinning and parallel async client routing.</li>
-        </ul>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Datastore</th>
+                <th>Storage Architecture</th>
+                <th>Latency</th>
+                <th>Distribution</th>
+                <th>Best For</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>local</code></td>
+                <td>Lock-free concurrent DashMaps on native heap</td>
+                <td>~0.0005 ms (&lt;1 µs)</td>
+                <td>Single process</td>
+                <td>Unit tests, monoliths, CLI tools, maximum throughput</td>
+              </tr>
+              <tr>
+                <td><code>redis</code></td>
+                <td>Standalone Redis or Sentinel with atomic Lua</td>
+                <td>~0.5 – 1.0 ms</td>
+                <td>Multi-node</td>
+                <td>Distributed microservices, shared quotas</td>
+              </tr>
+              <tr>
+                <td><code>redis-cluster</code></td>
+                <td>Native Redis Cluster with CRC16 Hash Tags</td>
+                <td>~0.5 – 1.0 ms</td>
+                <td>Multi-node sharded</td>
+                <td>High-availability enterprise clusters, PB-scale queuing</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <h3>100% Native Redis Cluster Support</h3>
-        <p>Redis Cluster partitions keys across 16,384 hash slots. Multi-key Lua scripts normally fail with <code>CROSSSLOT Keys in request don't hash to the same slot</code> if keys hash to different nodes.</p>
-        <p>TurboPulse guarantees <strong>100% zero CROSSSLOT errors</strong> by automatically wrapping all queue and limiter keys in Redis Hash Tags (e.g., <code>{turbopulse:myQueue}:wait</code>, <code>{turbopulse:myQueue}:active</code>). All keys for any given queue or limiter mathematically map to the exact same cluster hash slot via CRC16.</p>
+        <p>Redis Cluster splits keys across 16,384 hash slots. Multi-key Lua scripts normally fail with <code>CROSSSLOT Keys in request don't hash to the same slot</code> if keys hash to different nodes.</p>
+        <p>TurboPulse guarantees <strong>100% zero CROSSSLOT errors</strong> by automatically wrapping all queue and limiter keys in Redis Hash Tags (e.g., <code>{turbopulse:myQueue}:wait</code>, <code>{turbopulse:myQueue}:active</code>, <code>{turbopulse:myQueue}:jobs:123</code>). All keys for any given queue or limiter mathematically map to the exact same cluster hash slot via CRC16 % 16384.</p>
 
         <div class="code-container">
           <div class="code-header">
@@ -280,6 +312,7 @@ const localLimiter = localEngine.createRateLimiter({ capacity: 50 });</code></pr
             <button class="btn-copy">Copy</button>
           </div>
           <pre><code class="language-typescript">import { RateLimiter, Queue, Worker } from 'turbopulse';
+import { Cluster } from 'ioredis';
 
 // 1. Array of cluster node URLs
 const clusterQueue = new Queue('video-encode', {
@@ -301,6 +334,15 @@ const clusterWorker = new Worker('video-encode', async (job) => {
   return await encode(job.data);
 }, {
   clusterNodes: ['redis://10.0.0.1:7000', 'redis://10.0.0.2:7001'],
+});
+
+// 4. Pass existing ioredis Cluster client directly
+const ioredisCluster = new Cluster([
+  { host: '10.0.0.1', port: 7000 },
+  { host: '10.0.0.2', port: 7001 },
+]);
+const limiter = new RateLimiter({
+  connection: ioredisCluster,
 });</code></pre>
         </div>
       </section>
