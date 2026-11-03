@@ -70,7 +70,7 @@ TurboPulse automates resilience, scheduling, and connection management without r
    If a worker process dies abruptly (`SIGKILL`, Docker container eviction, or out-of-memory error), the active job lock lease expires. TurboPulse's automated background heartbeat detects orphaned locks, clears them, and re-enqueues the job to a healthy worker.
 
 2. **Automatic Exponential Backoff with Jitter:**
-   When an external service returns rate-limit (429) or transient (503) errors, TurboPulse automatically recalculates exponential delays ($delay \times 2^{\text{attempts}}$) and applies randomized jitter ($\pm 20\%$) to prevent thundering-herd synchronization spikes.
+   When an external service returns rate-limit (429) or transient (503) errors, TurboPulse automatically recalculates exponential delays (`delay * 2^attempts`) and applies randomized jitter (±20%) to prevent thundering-herd synchronization spikes.
 
 3. **Automatic Connection Multiplexing:**
    Rather than opening 2 to 3 dedicated TCP sockets per queue or limiter instance, all components targeting the same Redis instance automatically share a single, zero-overhead native connection pool.
@@ -532,10 +532,7 @@ npm run benchmark
 
 ### 3. Why `2,069,002 ops/sec (Leased)`: The L1/L2 Architecture
 
-When issuing single synchronous roundtrips over a network socket to Redis:
-$$\text{Max Theoretical Throughput} = \frac{1}{\text{Roundtrip Time (RTT)}}$$
-
-On a 0.05ms ping socket, a single thread is physically bounded at ~20,000 – 40,000 ops/sec.
+Standard distributed rate limiters issue a network roundtrip to Redis for every single token request. Because network packets take at least 0.05ms to travel back and forth over a local TCP socket, a single thread is physically capped at ~20,000 to 40,000 ops/sec regardless of how fast the code is.
 
 To support multi-million requests/sec on distributed clusters, TurboPulse implements the **Two-Tier Leased Reservoir Architecture** (used by Stripe, AWS, and Cloudflare):
 - **L2 Cluster Authority (Redis):** Maintains the cluster-wide quota atomically via Lua scripts.
@@ -591,7 +588,7 @@ npx ts-node test/realworld_workload_simulation.ts
 | `backoff.type` | `'exponential' \| 'fixed' \| 'linear'` | `'exponential'` | Backoff algorithm applied between retries. |
 | `backoff.delay`| `number` | `1000` | Base retry delay in milliseconds. |
 | `backoff.maxDelay`| `number` | `60000` | Upper bound cap for exponential backoff delay. |
-| `backoff.jitter`| `boolean` | `true` | Randomizes retry delays ($\pm 20\%$) to disperse herd spikes. |
+| `backoff.jitter`| `boolean` | `true` | Randomizes retry delays (±20%) to disperse herd spikes. |
 | `lifo` | `boolean` | `false` | When true, adds job to the head of the queue instead of tail. |
 | `timeout` | `number` | `30000` | Lock expiration TTL in milliseconds before job is considered stalled. |
 | `deduplication.id` | `string` | `undefined` | Unique deduplication key to discard identical uncompleted jobs. |
