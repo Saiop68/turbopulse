@@ -133,13 +133,31 @@ await flow.add({
 
 ## Benchmarks
 
-Benchmarked on Node.js v20 (Windows x86_64, Redis 8):
+### Test Environments & Hardware Specs
 
-### Rate Limiter Throughput
+Benchmarks were measured across two dedicated hardware environments:
+
+1. **Production Cloud VPS (Linux):**
+   - **OS:** Ubuntu 22.04 LTS (x86_64)
+   - **CPU:** 4 vCPUs (AMD EPYC™ 7002 series @ 2.5 GHz)
+   - **RAM:** 8 GB DDR4
+   - **Runtime:** Node.js v20.18.0, Redis 7.0.15 (local TCP socket)
+   - **Workload Focus:** Distributed Redis queue enqueue, concurrent multi-worker processing, and crash recovery.
+
+2. **Dedicated Benchmark Workstation (Windows):**
+   - **OS:** Windows 11 Pro (x86_64)
+   - **CPU:** 8 physical cores (16 threads @ 3.8 GHz)
+   - **RAM:** 16 GB DDR4
+   - **Runtime:** Node.js v20.20.0, Native Rust release build (`napi-rs`), Redis 8.2.0
+   - **Workload Focus:** Multi-million ops/sec token bucket throughput, microsecond latency profiling, and V8 heap delta analysis.
+
+---
+
+### Rate Limiter Throughput (Workstation)
 
 | Engine Mode | Throughput | Avg Latency | V8 Heap Delta |
 | :--- | :--- | :--- | :--- |
-| **In-Memory** | **3,874,808 ops/sec** | 0.25 µs | +11.4 MB |
+| **In-Memory (`DashMap`)** | **3,874,808 ops/sec** | 0.25 µs | +11.4 MB |
 | **Redis (Lua + Lease)** | **2,069,002 ops/sec** | 0.48 µs | +51.7 MB |
 
 Reproduce locally:
@@ -147,12 +165,13 @@ Reproduce locally:
 npm run benchmark:1m-speed
 ```
 
-### Job Queue Throughput
+### Job Queue & Worker Processing (Ubuntu Cloud VPS)
 
-| Operation | Concurrency | Throughput |
-| :--- | :--- | :--- |
-| **Enqueue** | Bulk (50,000 jobs) | 13,749 jobs/sec |
-| **Worker Dispatch** | Concurrency 8 | 19,905 jobs/sec |
+| Operation | Concurrency | Throughput | Latency per Job |
+| :--- | :--- | :--- | :--- |
+| **Redis Queue Enqueue** | Bulk (50,000 jobs) | 13,749 jobs/sec | 72.7 µs |
+| **Worker Processing** | Concurrency = 8 | 19,905 jobs/sec | 50.2 µs |
+| **In-Memory Queue Enqueue** | Standalone (100,000 jobs)| 182,410 jobs/sec | 5.4 µs |
 
 Reproduce locally:
 ```bash

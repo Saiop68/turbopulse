@@ -2,22 +2,44 @@ import * as path from 'path';
 import { TurboPulse } from './src_ts/engine';
 import { EngineConfig, EngineMode } from './src_ts/types';
 
+import * as fs from 'fs';
+
 // Dynamically locate and load the native .node binary
 let nativeBinding: any;
 
-const candidatePaths = [
-  path.resolve(__dirname, 'turbopulse.node'),
-  path.resolve(__dirname, '..', 'turbopulse.node'),
-  path.resolve(__dirname, 'build', 'Release', 'turbopulse.node'),
-  path.resolve(process.cwd(), 'turbopulse.node'),
-];
+try {
+  const rootIndex = require('./index.js');
+  if (rootIndex && (rootIndex.NativeEngine || rootIndex.nativeBinding)) {
+    nativeBinding = rootIndex.nativeBinding || rootIndex;
+  }
+} catch {}
 
-for (const candidate of candidatePaths) {
-  try {
-    nativeBinding = require(candidate);
-    break;
-  } catch {
-    // continue
+if (!nativeBinding) {
+  const candidateDirs = [
+    __dirname,
+    path.resolve(__dirname, '..'),
+    path.resolve(__dirname, 'build', 'Release'),
+    process.cwd(),
+  ];
+
+  for (const dir of candidateDirs) {
+    try {
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (file.startsWith('turbopulse') && file.endsWith('.node')) {
+            try {
+              const loaded = require(path.join(dir, file));
+              if (loaded && (loaded.NativeEngine || loaded.NativeRateLimiter)) {
+                nativeBinding = loaded;
+                break;
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+    if (nativeBinding) break;
   }
 }
 
@@ -26,7 +48,7 @@ if (!nativeBinding) {
     nativeBinding = require('./turbopulse.node');
   } catch (err: any) {
     throw new Error(
-      `Could not load native turbopulse binary. Searched paths: ${candidatePaths.join(', ')}. Details: ${err.message}`
+      `Could not load native turbopulse binary. Details: ${err.message}`
     );
   }
 }
