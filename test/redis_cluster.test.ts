@@ -132,3 +132,4 @@ assert.doesNotThrow(() => {
 console.log('   ✅ RateLimiter, Queue, and Worker options accept clusterNodes configurations');
 
 console.log('\n🎉 ALL REDIS CLUSTER TESTS PASSED WITH 100% SUCCESS!');
+
