@@ -72,3 +72,10 @@ jobs:
           npm run test:validation
           npm run test:limiter-dropin
           npm run test:queue-dropin
+
+      - name: Upload Native Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: turbopulse.*.node
+          if-no-files-found: error
