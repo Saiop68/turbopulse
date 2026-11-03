@@ -86,6 +86,8 @@ export interface LimiterOptions {
   client?: any;
   clientOptions?: any;
   redisUrl?: string;
+  clusterNodes?: string[];
+  nodes?: string[];
   clearDatastore?: boolean;
   trackDoneStatus?: boolean;
 }
@@ -234,6 +236,8 @@ export interface WorkerOptions {
   connection?: any;
   client?: any;
   redisUrl?: string;
+  clusterNodes?: string[];
+  nodes?: string[];
 }
 
 export interface NativeRateLimiterBinding {

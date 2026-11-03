@@ -1,4 +1,5 @@
-import { createInMemoryTurboPulse, JobState } from '../index';
+import { TurboPulse } from '../src_ts/engine';
+import { JobState } from '../src_ts/types';
 
 async function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -9,7 +10,7 @@ async function runQueueTests() {
   console.log('🧪 RUNNING TURBOPULSE JOB QUEUE TESTS');
   console.log('========================================\n');
 
-  const engine = createInMemoryTurboPulse();
+  const engine = TurboPulse.createInMemory();
 
   // TEST 1: Enqueue & Worker Processing with Concurrency
   console.log('▶ Test 1: Worker Execution & Concurrency');

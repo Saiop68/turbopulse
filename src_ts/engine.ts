@@ -55,6 +55,17 @@ export function extractRedisUrl(target: any): string {
     return target;
   }
 
+  // Handle arrays of cluster nodes directly: ['redis://127.0.0.1:7000', 'redis://127.0.0.1:7001']
+  if (Array.isArray(target)) {
+    return target.map((n) => extractRedisUrl(n)).join(',');
+  }
+
+  // Handle cluster nodes array from options or ioredis.Cluster
+  const clusterList = target.clusterNodes || target.nodes || target.startupNodes;
+  if (Array.isArray(clusterList) && clusterList.length > 0) {
+    return clusterList.map((n) => extractRedisUrl(n)).join(',');
+  }
+
   if (target.redisUrl && typeof target.redisUrl === 'string') {
     return target.redisUrl;
   }

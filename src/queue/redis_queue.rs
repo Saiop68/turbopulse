@@ -1,10 +1,10 @@
-use redis::aio::ConnectionManager;
-use redis::{AsyncCommands, Client, Script};
+use redis::Script;
 use serde_json;
 
 use crate::config::BackoffType;
 use crate::error::TurboPulseError;
 use crate::queue::job::{JobCounts, JobRecord, JobState};
+use crate::redis_backend::RedisBackend;
 use crate::utils::time::{calculate_backoff, current_time_ms};
 
 const PUSH_JOB_LUA: &str = r#"
@@ -74,9 +74,9 @@ if is_paused == '1' then
     return {}
 end
 
--- 1. Promote matured delayed jobs
-local matured = redis.call('ZRANGEBYSCORE', delayed_key, 0, now, 'LIMIT', 0, 50)
-for _, id in ipairs(matured) do
+-- 1. Move ready delayed jobs to wait queue
+local ready_delayed = redis.call('ZRANGEBYSCORE', delayed_key, 0, now, 'LIMIT', 0, 100)
+for _, id in ipairs(ready_delayed) do
     redis.call('ZREM', delayed_key, id)
     redis.call('ZADD', wait_key, 0, id)
 end
@@ -147,7 +147,7 @@ return 1
 "#;
 
 pub struct RedisQueue {
-    manager: ConnectionManager,
+    backend: RedisBackend,
     key_prefix: String,
     push_script: Script,
     bulk_push_script: Script,
@@ -158,11 +158,10 @@ pub struct RedisQueue {
 
 impl RedisQueue {
     pub async fn new(redis_url: &str, key_prefix: Option<String>) -> Result<Self, TurboPulseError> {
-        let client = Client::open(redis_url).map_err(TurboPulseError::Redis)?;
-        let manager = ConnectionManager::new(client).await.map_err(TurboPulseError::Redis)?;
+        let backend = RedisBackend::new(redis_url).await?;
 
         Ok(Self {
-            manager,
+            backend,
             key_prefix: key_prefix.unwrap_or_else(|| "turbopulse:queue".to_string()),
             push_script: Script::new(PUSH_JOB_LUA),
             bulk_push_script: Script::new(BULK_PUSH_JOB_LUA),
@@ -173,38 +172,43 @@ impl RedisQueue {
     }
 
     #[inline]
+    fn prefix(&self, q: &str) -> String {
+        format!("{{{}:{}}}", self.key_prefix, q)
+    }
+
+    #[inline]
     fn wait_key(&self, q: &str) -> String {
-        format!("{}:{}:wait", self.key_prefix, q)
+        format!("{}:wait", self.prefix(q))
     }
 
     #[inline]
     fn delayed_key(&self, q: &str) -> String {
-        format!("{}:{}:delayed", self.key_prefix, q)
+        format!("{}:delayed", self.prefix(q))
     }
 
     #[inline]
     fn active_key(&self, q: &str) -> String {
-        format!("{}:{}:active", self.key_prefix, q)
+        format!("{}:active", self.prefix(q))
     }
 
     #[inline]
     fn completed_key(&self, q: &str) -> String {
-        format!("{}:{}:completed", self.key_prefix, q)
+        format!("{}:completed", self.prefix(q))
     }
 
     #[inline]
     fn failed_key(&self, q: &str) -> String {
-        format!("{}:{}:failed", self.key_prefix, q)
+        format!("{}:failed", self.prefix(q))
     }
 
     #[inline]
     fn job_key(&self, q: &str, id: &str) -> String {
-        format!("{}:{}:jobs:{}", self.key_prefix, q, id)
+        format!("{}:jobs:{}", self.prefix(q), id)
     }
 
     #[inline]
     fn meta_key(&self, q: &str) -> String {
-        format!("{}:{}:meta", self.key_prefix, q)
+        format!("{}:meta", self.prefix(q))
     }
 
     pub async fn push_job(&self, job: JobRecord) -> Result<(), TurboPulseError> {
@@ -214,20 +218,16 @@ impl RedisQueue {
         let now = current_time_ms();
         let payload = serde_json::to_string(&job)?;
 
-        let mut conn = self.manager.clone();
-        let _: i64 = self
-            .push_script
-            .key(self.wait_key(q))
-            .key(self.delayed_key(q))
+        let mut inv = self.push_script.key(self.wait_key(q));
+        inv.key(self.delayed_key(q))
             .key(self.job_key(q, job_id))
             .arg(job_id)
             .arg(priority)
             .arg(job.delay_until_ms)
             .arg(now)
-            .arg(payload)
-            .invoke_async(&mut conn)
-            .await
-            .map_err(TurboPulseError::Redis)?;
+            .arg(payload);
+
+        let _: i64 = self.backend.invoke_script(&inv).await?;
 
         Ok(())
     }
@@ -239,7 +239,7 @@ impl RedisQueue {
 
         let now = current_time_ms();
         let q = &jobs[0].queue_name;
-        let prefix = format!("{}:{}", self.key_prefix, q);
+        let prefix = self.prefix(q);
         let mut ids = Vec::with_capacity(jobs.len());
 
         for chunk in jobs.chunks(500) {
@@ -261,8 +261,7 @@ impl RedisQueue {
                 ids.push(job.id.clone());
             }
 
-            let mut conn = self.manager.clone();
-            let _: i64 = script_inv.invoke_async(&mut conn).await.map_err(TurboPulseError::Redis)?;
+            let _: i64 = self.backend.invoke_script(&script_inv).await?;
         }
 
         Ok(ids)
@@ -275,21 +274,17 @@ impl RedisQueue {
 
     pub async fn fetch_next_batch(&self, queue_name: &str, count: usize) -> Result<Vec<JobRecord>, TurboPulseError> {
         let now = current_time_ms();
-        let queue_prefix = format!("{}:{}", self.key_prefix, queue_name);
+        let queue_prefix = self.prefix(queue_name);
 
-        let mut conn = self.manager.clone();
-        let raw_list: Vec<String> = self
-            .fetch_batch_script
-            .key(self.delayed_key(queue_name))
-            .key(self.wait_key(queue_name))
+        let mut inv = self.fetch_batch_script.key(self.delayed_key(queue_name));
+        inv.key(self.wait_key(queue_name))
             .key(self.active_key(queue_name))
             .key(self.meta_key(queue_name))
             .arg(now)
             .arg(&queue_prefix)
-            .arg(count as i64)
-            .invoke_async(&mut conn)
-            .await
-            .map_err(TurboPulseError::Redis)?;
+            .arg(count as i64);
+
+        let raw_list: Vec<String> = self.backend.invoke_script(&inv).await?;
 
         let mut jobs = Vec::with_capacity(raw_list.len());
         for raw in raw_list {
@@ -311,24 +306,20 @@ impl RedisQueue {
         return_value: Option<Vec<u8>>,
     ) -> Result<(), TurboPulseError> {
         let now = current_time_ms();
-        let mut conn = self.manager.clone();
         let key = self.job_key(queue_name, job_id);
 
         let ret_str = return_value
             .map(|v| String::from_utf8_lossy(&v).to_string())
             .unwrap_or_default();
 
-        let _: i64 = self
-            .complete_script
-            .key(self.active_key(queue_name))
-            .key(self.completed_key(queue_name))
+        let mut inv = self.complete_script.key(self.active_key(queue_name));
+        inv.key(self.completed_key(queue_name))
             .key(&key)
             .arg(job_id)
             .arg(ret_str)
-            .arg(now)
-            .invoke_async(&mut conn)
-            .await
-            .map_err(TurboPulseError::Redis)?;
+            .arg(now);
+
+        let _: i64 = self.backend.invoke_script(&inv).await?;
 
         Ok(())
     }
@@ -340,10 +331,9 @@ impl RedisQueue {
         error_msg: &str,
     ) -> Result<bool, TurboPulseError> {
         let now = current_time_ms();
-        let mut conn = self.manager.clone();
         let key = self.job_key(queue_name, job_id);
 
-        let raw: Option<String> = conn.get(&key).await.map_err(TurboPulseError::Redis)?;
+        let raw = self.backend.get(&key).await?;
         if let Some(s) = raw {
             if let Ok(mut job) = serde_json::from_str::<JobRecord>(&s) {
                 let max_retries = job.config.max_retries.unwrap_or(3);
@@ -368,22 +358,19 @@ impl RedisQueue {
                 };
 
                 if let Ok(updated) = serde_json::to_string(&job) {
-                    let _: () = conn.set(&key, updated).await.unwrap_or(());
+                    let _ = self.backend.set(&key, &updated).await;
                 }
 
-                let _: i64 = self
-                    .fail_script
-                    .key(self.active_key(queue_name))
-                    .key(self.delayed_key(queue_name))
+                let mut inv = self.fail_script.key(self.active_key(queue_name));
+                inv.key(self.delayed_key(queue_name))
                     .key(self.failed_key(queue_name))
                     .key(&key)
                     .arg(job_id)
                     .arg(retry_delay)
                     .arg(is_final)
-                    .arg(now)
-                    .invoke_async(&mut conn)
-                    .await
-                    .map_err(TurboPulseError::Redis)?;
+                    .arg(now);
+
+                let _: i64 = self.backend.invoke_script(&inv).await?;
 
                 return Ok(is_final == 1);
             }
@@ -398,14 +385,13 @@ impl RedisQueue {
         job_id: &str,
         progress: u32,
     ) -> Result<(), TurboPulseError> {
-        let mut conn = self.manager.clone();
         let key = self.job_key(queue_name, job_id);
-        let raw: Option<String> = conn.get(&key).await.map_err(TurboPulseError::Redis)?;
+        let raw = self.backend.get(&key).await?;
         if let Some(s) = raw {
             if let Ok(mut job) = serde_json::from_str::<JobRecord>(&s) {
                 job.progress = progress.min(100);
                 let updated = serde_json::to_string(&job)?;
-                conn.set::<_, _, ()>(&key, updated).await.map_err(TurboPulseError::Redis)?;
+                self.backend.set(&key, &updated).await?;
                 return Ok(());
             }
         }
@@ -413,9 +399,8 @@ impl RedisQueue {
     }
 
     pub async fn get_job(&self, queue_name: &str, job_id: &str) -> Result<Option<JobRecord>, TurboPulseError> {
-        let mut conn = self.manager.clone();
         let key = self.job_key(queue_name, job_id);
-        let raw: Option<String> = conn.get(&key).await.map_err(TurboPulseError::Redis)?;
+        let raw = self.backend.get(&key).await?;
         if let Some(s) = raw {
             let job: JobRecord = serde_json::from_str(&s)?;
             Ok(Some(job))
@@ -425,12 +410,11 @@ impl RedisQueue {
     }
 
     pub async fn get_counts(&self, queue_name: &str) -> Result<JobCounts, TurboPulseError> {
-        let mut conn = self.manager.clone();
-        let wait: u32 = conn.zcard(self.wait_key(queue_name)).await.unwrap_or(0);
-        let active: u32 = conn.zcard(self.active_key(queue_name)).await.unwrap_or(0);
-        let delayed: u32 = conn.zcard(self.delayed_key(queue_name)).await.unwrap_or(0);
-        let completed: u32 = conn.zcard(self.completed_key(queue_name)).await.unwrap_or(0);
-        let failed: u32 = conn.zcard(self.failed_key(queue_name)).await.unwrap_or(0);
+        let wait = self.backend.zcard(&self.wait_key(queue_name)).await.unwrap_or(0);
+        let active = self.backend.zcard(&self.active_key(queue_name)).await.unwrap_or(0);
+        let delayed = self.backend.zcard(&self.delayed_key(queue_name)).await.unwrap_or(0);
+        let completed = self.backend.zcard(&self.completed_key(queue_name)).await.unwrap_or(0);
+        let failed = self.backend.zcard(&self.failed_key(queue_name)).await.unwrap_or(0);
 
         Ok(JobCounts {
             waiting: wait,
@@ -442,23 +426,20 @@ impl RedisQueue {
     }
 
     pub async fn pause(&self, queue_name: &str) -> Result<(), TurboPulseError> {
-        let mut conn = self.manager.clone();
-        conn.hset::<_, _, _, ()>(self.meta_key(queue_name), "paused", "1")
+        self.backend
+            .hset(&self.meta_key(queue_name), "paused", "1")
             .await
-            .map_err(TurboPulseError::Redis)
     }
 
     pub async fn resume(&self, queue_name: &str) -> Result<(), TurboPulseError> {
-        let mut conn = self.manager.clone();
-        conn.hset::<_, _, _, ()>(self.meta_key(queue_name), "paused", "0")
+        self.backend
+            .hset(&self.meta_key(queue_name), "paused", "0")
             .await
-            .map_err(TurboPulseError::Redis)
     }
 
     pub async fn drain(&self, queue_name: &str) -> Result<(), TurboPulseError> {
-        let mut conn = self.manager.clone();
-        let _: () = conn.del(self.wait_key(queue_name)).await.unwrap_or(());
-        let _: () = conn.del(self.delayed_key(queue_name)).await.unwrap_or(());
+        let _ = self.backend.del(&self.wait_key(queue_name)).await;
+        let _ = self.backend.del(&self.delayed_key(queue_name)).await;
         Ok(())
     }
 
@@ -471,25 +452,25 @@ impl RedisQueue {
             _ => return Ok(0),
         };
 
-        let mut conn = self.manager.clone();
-        let ids: Vec<String> = conn.zrangebyscore_limit(&target_key, 0, max_score, 0, limit as isize)
+        let ids = self
+            .backend
+            .zrangebyscore_limit(&target_key, 0, max_score, 0, limit as isize)
             .await
             .unwrap_or_default();
 
         let count = ids.len() as u32;
         for id in ids {
-            let _: () = conn.zrem(&target_key, &id).await.unwrap_or(());
-            let _: () = conn.del(self.job_key(queue_name, &id)).await.unwrap_or(());
+            let _ = self.backend.zrem(&target_key, &id).await;
+            let _ = self.backend.del(&self.job_key(queue_name, &id)).await;
         }
 
         Ok(count)
     }
 
     pub async fn promote(&self, queue_name: &str, job_id: &str) -> Result<bool, TurboPulseError> {
-        let mut conn = self.manager.clone();
-        let removed: i64 = conn.zrem(self.delayed_key(queue_name), job_id).await.map_err(TurboPulseError::Redis)?;
+        let removed = self.backend.zrem(&self.delayed_key(queue_name), job_id).await?;
         if removed > 0 {
-            conn.zadd::<_, _, _, ()>(self.wait_key(queue_name), job_id, 0).await.map_err(TurboPulseError::Redis)?;
+            self.backend.zadd(&self.wait_key(queue_name), job_id, 0).await?;
             Ok(true)
         } else {
             Ok(false)
@@ -499,33 +480,34 @@ impl RedisQueue {
     pub async fn recover_stalled(&self, queue_name: &str, lock_duration_ms: u64, max_stalled: u32) -> Result<u32, TurboPulseError> {
         let now = current_time_ms();
         let max_score = now.saturating_sub(lock_duration_ms);
-        let mut conn = self.manager.clone();
 
-        let stalled_ids: Vec<String> = conn.zrangebyscore_limit(self.active_key(queue_name), 0, max_score, 0, 100)
+        let stalled_ids = self
+            .backend
+            .zrangebyscore_limit(&self.active_key(queue_name), 0, max_score, 0, 100)
             .await
             .unwrap_or_default();
 
         let mut recovered = 0;
         for id in stalled_ids {
-            let _: () = conn.zrem(self.active_key(queue_name), &id).await.unwrap_or(());
+            let _ = self.backend.zrem(&self.active_key(queue_name), &id).await;
             let job_k = self.job_key(queue_name, &id);
-            if let Ok(Some(raw)) = conn.get::<_, Option<String>>(&job_k).await {
+            if let Ok(Some(raw)) = self.backend.get(&job_k).await {
                 if let Ok(mut job) = serde_json::from_str::<JobRecord>(&raw) {
                     if job.attempts_made < max_stalled {
                         job.state = JobState::Waiting;
                         if let Ok(updated) = serde_json::to_string(&job) {
-                            let _: () = conn.set(&job_k, updated).await.unwrap_or(());
+                            let _ = self.backend.set(&job_k, &updated).await;
                         }
-                        let _: () = conn.zadd(self.wait_key(queue_name), &id, 0).await.unwrap_or(());
+                        let _ = self.backend.zadd(&self.wait_key(queue_name), &id, 0).await;
                         recovered += 1;
                     } else {
                         job.state = JobState::Failed;
                         job.finished_at = Some(now);
                         job.failed_reason = Some(format!("Stalled more than {} times", max_stalled));
                         if let Ok(updated) = serde_json::to_string(&job) {
-                            let _: () = conn.set(&job_k, updated).await.unwrap_or(());
+                            let _ = self.backend.set(&job_k, &updated).await;
                         }
-                        let _: () = conn.zadd(self.failed_key(queue_name), &id, now).await.unwrap_or(());
+                        let _ = self.backend.zadd(&self.failed_key(queue_name), &id, now as i64).await;
                     }
                 }
             }
@@ -535,14 +517,13 @@ impl RedisQueue {
     }
 
     pub async fn update_data(&self, queue_name: &str, job_id: &str, data: Vec<u8>) -> Result<(), TurboPulseError> {
-        let mut conn = self.manager.clone();
         let key = self.job_key(queue_name, job_id);
-        let raw: Option<String> = conn.get(&key).await.map_err(TurboPulseError::Redis)?;
+        let raw = self.backend.get(&key).await?;
         if let Some(s) = raw {
             if let Ok(mut job) = serde_json::from_str::<JobRecord>(&s) {
                 job.data = data;
                 let updated = serde_json::to_string(&job)?;
-                conn.set::<_, _, ()>(&key, updated).await.map_err(TurboPulseError::Redis)?;
+                self.backend.set(&key, &updated).await?;
                 return Ok(());
             }
         }

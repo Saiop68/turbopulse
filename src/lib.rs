@@ -2,6 +2,7 @@ pub mod config;
 pub mod error;
 pub mod queue;
 pub mod rate_limiter;
+pub mod redis_backend;
 pub mod utils;
 
 use std::sync::Arc;

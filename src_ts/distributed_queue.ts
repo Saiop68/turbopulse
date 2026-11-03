@@ -170,6 +170,8 @@ export class Queue<DataType = any, ResultType = any, NameType extends string = s
       client?: any;
       defaultJobOptions?: QueueJobOptions;
       redisUrl?: string;
+      clusterNodes?: string[];
+      nodes?: string[];
     } = {}
   ) {
     if (typeof name !== 'string' || name.trim().length === 0) {
@@ -185,12 +187,24 @@ export class Queue<DataType = any, ResultType = any, NameType extends string = s
     this.name = name;
     this.defaultJobOptions = opts.defaultJobOptions || {};
     this.readyPromise = this.init(opts);
+    this.readyPromise.catch(() => {});
   }
 
   private async init(opts: any): Promise<void> {
-    const isRedis = Boolean(opts.connection || opts.client || opts.redisUrl);
+    const isRedis = Boolean(
+      opts.connection ||
+      opts.client ||
+      opts.redisUrl ||
+      opts.clusterNodes ||
+      opts.nodes
+    );
     if (isRedis) {
-      const target = opts.connection || opts.client || opts.redisUrl;
+      const target =
+        opts.connection ||
+        opts.client ||
+        opts.redisUrl ||
+        opts.clusterNodes ||
+        opts.nodes;
       const engine = await getSharedRedisEngine(target);
       this.nativeBinding = (engine as any).nativeEngine.createQueue(this.name);
     } else {
@@ -488,12 +502,24 @@ export class Worker<DataType = any, ResultType = any, NameType extends string = 
     };
 
     this.readyPromise = this.init();
+    this.readyPromise.catch(() => {});
   }
 
   private async init(): Promise<void> {
-    const isRedis = Boolean(this.options.connection || this.options.client || this.options.redisUrl);
+    const isRedis = Boolean(
+      this.options.connection ||
+      this.options.client ||
+      this.options.redisUrl ||
+      this.options.clusterNodes ||
+      this.options.nodes
+    );
     if (isRedis) {
-      const target = this.options.connection || this.options.client || this.options.redisUrl;
+      const target =
+        this.options.connection ||
+        this.options.client ||
+        this.options.redisUrl ||
+        this.options.clusterNodes ||
+        this.options.nodes;
       const engine = await getSharedRedisEngine(target);
       this.queueBinding = (engine as any).nativeEngine.createQueue(this.name);
       if (this.options.limiter) {

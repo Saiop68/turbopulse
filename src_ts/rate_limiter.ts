@@ -316,6 +316,7 @@ export class RateLimiter extends EventEmitter {
 
     this.id = this.options.id || `limiter_${Math.random().toString(36).substring(2, 9)}`;
     this.readyPromise = this.initEngine();
+    this.readyPromise.catch(() => {});
   }
 
   private mapLimiterStrategy(s: any): any {
@@ -335,7 +336,9 @@ export class RateLimiter extends EventEmitter {
         this.options.redisUrl ||
         this.options.connection ||
         this.options.client ||
-        this.options.clientOptions
+        this.options.clientOptions ||
+        this.options.clusterNodes ||
+        this.options.nodes
       );
 
     const config: RateLimiterConfig = {
@@ -360,7 +363,9 @@ export class RateLimiter extends EventEmitter {
         this.options.connection ||
         this.options.client ||
         this.options.clientOptions ||
-        this.options.redisUrl;
+        this.options.redisUrl ||
+        this.options.clusterNodes ||
+        this.options.nodes;
       const engine = await getSharedRedisEngine(target);
       this.nativeLimiter = (engine as any).nativeEngine.createRateLimiter(config);
     } else {

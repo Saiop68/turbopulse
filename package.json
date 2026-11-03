@@ -1,12 +1,9 @@
 {
   "name": "turbopulse",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Production-grade, zero-copy distributed rate limiting and job queue engine for Node.js powered by Rust & napi-rs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "engines": {
-    "node": ">=18.0.0"
-  },
   "napi": {
     "name": "turbopulse",
     "triples": {
@@ -42,6 +39,8 @@
     "test:limiter-dropin": "ts-node test/rate_limiter_dropin.test.ts",
     "test:queue-dropin": "ts-node test/queue_dropin.test.ts",
     "test:validation": "ts-node test/user_input_validation.test.ts",
+    "test:cluster": "ts-node test/redis_cluster.test.ts",
+    "test:all": "npm test && npm run test:queue && npm run test:limiter-dropin && npm run test:queue-dropin && npm run test:validation && npm run test:cluster",
     "benchmark": "ts-node test/benchmark.ts",
     "benchmark:redis": "ts-node test/benchmark_redis.ts",
     "benchmark:1m": "ts-node test/benchmark_1million.ts",

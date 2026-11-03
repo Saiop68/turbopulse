@@ -259,6 +259,52 @@ const localLimiter = localEngine.createRateLimiter({ capacity: 50 });</code></pr
         <p>TurboPulse automatically normalizes Redis targets from raw URLs, existing <code>ioredis</code> clients, <code>node-redis</code> instances, or plain connection options (<code>{ host, port, password, tls }</code>).</p>
       </section>
 
+      <!-- Section: Datastore & Redis Cluster -->
+      <section id="redis-cluster" class="section">
+        <h2>Datastore Definition & Redis Cluster Support</h2>
+        <p>TurboPulse provides native multi-backend storage support through compiled Rust:</p>
+
+        <ul>
+          <li><strong><code>local</code>:</strong> Compiled Rust lock-free concurrent DashMaps on the native heap. Sub-microsecond latency (<1µs), zero network overhead, zero GC pauses.</li>
+          <li><strong><code>redis</code>:</strong> Distributed standalone Redis or Sentinel with atomic Lua scripts.</li>
+          <li><strong><code>redis-cluster</code>:</strong> 100% native Redis Cluster with automatic Hash-Tag slot pinning and parallel async client routing.</li>
+        </ul>
+
+        <h3>100% Native Redis Cluster Support</h3>
+        <p>Redis Cluster partitions keys across 16,384 hash slots. Multi-key Lua scripts normally fail with <code>CROSSSLOT Keys in request don't hash to the same slot</code> if keys hash to different nodes.</p>
+        <p>TurboPulse guarantees <strong>100% zero CROSSSLOT errors</strong> by automatically wrapping all queue and limiter keys in Redis Hash Tags (e.g., <code>{turbopulse:myQueue}:wait</code>, <code>{turbopulse:myQueue}:active</code>). All keys for any given queue or limiter mathematically map to the exact same cluster hash slot via CRC16.</p>
+
+        <div class="code-container">
+          <div class="code-header">
+            <span>cluster_examples.ts</span>
+            <button class="btn-copy">Copy</button>
+          </div>
+          <pre><code class="language-typescript">import { RateLimiter, Queue, Worker } from 'turbopulse';
+
+// 1. Array of cluster node URLs
+const clusterQueue = new Queue('video-encode', {
+  clusterNodes: [
+    'redis://10.0.0.1:7000',
+    'redis://10.0.0.2:7001',
+    'redis://10.0.0.3:7002',
+  ],
+});
+
+// 2. Comma-separated or redis+cluster:// connection string
+const clusterLimiter = new RateLimiter({
+  redisUrl: 'redis://10.0.0.1:7000,redis://10.0.0.2:7001',
+  reservoir: 1000,
+});
+
+// 3. Worker with cluster connection
+const clusterWorker = new Worker('video-encode', async (job) => {
+  return await encode(job.data);
+}, {
+  clusterNodes: ['redis://10.0.0.1:7000', 'redis://10.0.0.2:7001'],
+});</code></pre>
+        </div>
+      </section>
+
       <!-- Section: Rate Limiting In-Depth -->
       <section id="rate-limiting-basics" class="section">
         <h2>RateLimiter API</h2>

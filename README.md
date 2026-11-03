@@ -140,6 +140,90 @@ TurboPulse automatically normalizes Redis targets from raw URLs, existing `iored
 
 ---
 
+## Datastore Definition & Redis Cluster Support
+
+TurboPulse supports two high-performance storage backends configurable via the `datastore` option or connection parameters:
+
+| Datastore | Description | Latency | Distributed | Best For |
+| :--- | :--- | :--- | :--- | :--- |
+| **`local`** | Rust compiled lock-free `DashMap` (In-Memory) | ~0.0005 ms (<1 µs) | Single process | Unit tests, monoliths, CLI tools, maximum throughput |
+| **`redis`** | Single Redis instance or Sentinel | ~0.5 – 1.0 ms | Multi-node | Distributed microservices, shared rate quotas |
+| **`redis-cluster`** | Native Redis Cluster with CRC16 Hash Tags | ~0.5 – 1.0 ms | Multi-node sharded | High-availability enterprise clusters, PB-scale queuing |
+
+### Configuring the Datastore
+
+You can configure the datastore directly on `RateLimiter`, `Queue`, or `Worker`:
+
+```typescript
+// 1. In-Memory Datastore (Default when no Redis connection is provided)
+const localLimiter = new RateLimiter({
+  datastore: 'local',
+  reservoir: 100,
+});
+
+// 2. Standalone Redis Datastore
+const redisLimiter = new RateLimiter({
+  datastore: 'redis',
+  redisUrl: 'redis://127.0.0.1:6379',
+});
+
+// Or on a distributed Queue:
+const queue = new Queue('transcode', {
+  redisUrl: 'redis://127.0.0.1:6379',
+});
+```
+
+### 100% Native Redis Cluster Support
+
+Redis Cluster splits data into 16,384 hash slots across multiple nodes. Multi-key Lua scripts normally fail with `CROSSSLOT Keys in request don't hash to the same slot` if keys belong to different nodes.
+
+TurboPulse provides **100% full native Redis Cluster support**:
+1. **Automatic Hash Tag Slot Pinning:** TurboPulse automatically encapsulates all queue and limiter keys in Redis Hash Tags (e.g. `{turbopulse:myQueue}:wait`, `{turbopulse:myQueue}:active`, `{turbopulse:myQueue}:jobs:123`). This mathematically guarantees that all keys for a given queue or rate limiter hash to the exact same cluster node via CRC16 % 16384, preventing 100% of `CROSSSLOT` errors.
+2. **Native Asynchronous Cluster Client:** Powered by `redis::cluster_async::ClusterConnection` directly in native Rust for parallel async pipeline routing without V8 bridge overhead.
+3. **Multiple Cluster Configuration Formats:**
+
+```typescript
+import { RateLimiter, Queue, Worker } from 'turbopulse';
+
+// Format A: Array of cluster node URLs
+const clusterQueue = new Queue('image-processor', {
+  clusterNodes: [
+    'redis://10.0.0.1:7000',
+    'redis://10.0.0.2:7001',
+    'redis://10.0.0.3:7002',
+  ],
+});
+
+// Format B: Array of node config objects
+const clusterLimiter = new RateLimiter({
+  nodes: [
+    { host: '10.0.0.1', port: 7000 },
+    { host: '10.0.0.2', port: 7001 },
+  ],
+  reservoir: 5000,
+});
+
+// Format C: Comma-separated or redis+cluster:// string
+const clusterWorker = new Worker('image-processor', async (job) => {
+  return await processImage(job.data);
+}, {
+  redisUrl: 'redis://10.0.0.1:7000,redis://10.0.0.2:7001',
+});
+
+// Format D: Existing ioredis Cluster instance
+import { Cluster } from 'ioredis';
+const ioredisCluster = new Cluster([
+  { host: '10.0.0.1', port: 7000 },
+  { host: '10.0.0.2', port: 7001 },
+]);
+
+const limiter = new RateLimiter({
+  connection: ioredisCluster,
+});
+```
+
+---
+
 ## Rate Limiting Guide
 
 ### Basic Rate Limiting
