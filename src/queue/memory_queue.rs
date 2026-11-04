@@ -178,13 +178,15 @@ impl InMemoryQueue {
                 if top.delay_until_ms <= now {
                     let delayed_item = delayed_guard.pop().unwrap();
                     if let Some(mut job) = self.jobs.get_mut(&delayed_item.job_id) {
-                        job.state = JobState::Waiting;
-                        let seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
-                        waiting_guard.push(PrioritizedJob {
-                            priority: job.config.priority.unwrap_or(0),
-                            sequence: seq,
-                            job_id: delayed_item.job_id,
-                        });
+                        if job.state == JobState::Delayed {
+                            job.state = JobState::Waiting;
+                            let seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
+                            waiting_guard.push(PrioritizedJob {
+                                priority: job.config.priority.unwrap_or(0),
+                                sequence: seq,
+                                job_id: delayed_item.job_id,
+                            });
+                        }
                     }
                 } else {
                     break;
@@ -247,6 +249,7 @@ impl InMemoryQueue {
                     next_job.processed_at = None;
                     next_job.finished_at = None;
                     next_job.attempts_made = 0;
+                    next_job.stalled_count = 0;
                     repeat_to_schedule = Some(next_job);
                 }
             }
@@ -423,7 +426,8 @@ impl InMemoryQueue {
         for id in stalled_ids {
             q.active_ids.remove(&id);
             if let Some(mut job) = self.jobs.get_mut(&id) {
-                if job.attempts_made < max_stalled {
+                job.stalled_count += 1;
+                if job.stalled_count <= max_stalled {
                     // Re-enqueue for retry
                     job.state = JobState::Waiting;
                     let seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
@@ -438,7 +442,7 @@ impl InMemoryQueue {
                     // Mark as stalled permanently
                     job.state = JobState::Failed;
                     job.finished_at = Some(now);
-                    job.failed_reason = Some(format!("Stalled more than {} times", max_stalled));
+                    job.failed_reason = Some(format!("Stalled {} times (exceeded maxStalledCount {})", job.stalled_count, max_stalled));
                     q.failed_ids.insert(id, now);
                 }
             }

@@ -148,8 +148,14 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
         const dto = await this.nativeQueue.fetchNext();
         if (!dto) {
           // Queue is empty or paused: back off briefly
-          if (this.rateLimiter) {
-            await this.nativeLimiter!.release(`worker:${this.name}`);
+          if (this.rateLimiter && this.nativeLimiter) {
+            try {
+              if (typeof (this.nativeLimiter as any).refund === 'function') {
+                await (this.nativeLimiter as any).refund(`worker:${this.name}`, 1);
+              } else {
+                await this.nativeLimiter.release(`worker:${this.name}`);
+              }
+            } catch {}
           }
           await this.sleep(this.pollIntervalMs);
           continue;
@@ -176,8 +182,8 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
           }
         } finally {
           this.activeJobs--;
-          if (this.rateLimiter) {
-            await this.nativeLimiter!.release(`worker:${this.name}`);
+          if (this.rateLimiter && this.nativeLimiter) {
+            await this.nativeLimiter.release(`worker:${this.name}`);
           }
 
           if (!this.isRunning && this.activeJobs === 0 && this.closeResolve) {

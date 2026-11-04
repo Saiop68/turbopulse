@@ -3,7 +3,7 @@ use redis::Script;
 
 use crate::config::RateLimiterConfig;
 use crate::error::TurboPulseError;
-use crate::rate_limiter::lua_scripts::{ACQUIRE_TOKEN_LUA, RELEASE_CONCURRENCY_LUA, STATUS_LUA};
+use crate::rate_limiter::lua_scripts::{ACQUIRE_TOKEN_LUA, REFUND_PERMIT_LUA, RELEASE_CONCURRENCY_LUA, STATUS_LUA};
 use crate::rate_limiter::{RateLimitResult, RateLimiterBackend, RateLimiterStatus};
 use crate::redis_backend::RedisBackend;
 use crate::utils::time::current_time_ms;
@@ -13,6 +13,7 @@ pub struct RedisRateLimiter {
     key_prefix: String,
     acquire_script: Script,
     release_script: Script,
+    refund_script: Script,
     status_script: Script,
 }
 
@@ -25,6 +26,7 @@ impl RedisRateLimiter {
             key_prefix: key_prefix.unwrap_or_else(|| "turbopulse:rl".to_string()),
             acquire_script: Script::new(ACQUIRE_TOKEN_LUA),
             release_script: Script::new(RELEASE_CONCURRENCY_LUA),
+            refund_script: Script::new(REFUND_PERMIT_LUA),
             status_script: Script::new(STATUS_LUA),
         })
     }
@@ -73,10 +75,20 @@ impl RateLimiterBackend for RedisRateLimiter {
 
     async fn release(&self, key: &str) -> Result<u32, TurboPulseError> {
         let redis_key = self.format_key(key);
-        let inv = self.release_script.key(&redis_key);
+        let mut inv = self.release_script.key(&redis_key);
+        inv.arg(60);
         let active: i64 = self.backend.invoke_script(&inv).await?;
 
         Ok(active.max(0) as u32)
+    }
+
+    async fn refund(&self, key: &str, tokens: u32) -> Result<(), TurboPulseError> {
+        let redis_key = self.format_key(key);
+        let mut inv = self.refund_script.key(&redis_key);
+        inv.arg(tokens);
+        inv.arg(60);
+        let _: i64 = self.backend.invoke_script(&inv).await?;
+        Ok(())
     }
 
     async fn status(

@@ -244,6 +244,7 @@ export interface NativeRateLimiterBinding {
   acquire(key: string, tokens?: number): Promise<RateLimitResult>;
   acquireSync(key: string, tokens?: number): RateLimitResult;
   release(key: string): Promise<number>;
+  refund(key: string, tokens?: number): Promise<void>;
   status(key: string): Promise<RateLimiterStatus>;
   reset(key: string): Promise<void>;
   cleanup(ttlMs?: number): number;

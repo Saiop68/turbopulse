@@ -131,9 +131,9 @@ export class Job<DataType = any, ResultType = any, NameType extends string = str
   /**
    * Fetches current state
    */
-  public async getState(): Promise<JobState> {
+  public async getState(): Promise<JobState | undefined> {
     const dto = await this.queueBinding.getJob(this.id);
-    return dto ? dto.state : JobState.Completed;
+    return dto ? dto.state : undefined;
   }
 
   /**
@@ -645,6 +645,15 @@ export class Worker<DataType = any, ResultType = any, NameType extends string = 
       }
 
       if (!dto) {
+        if (this.rateLimiter) {
+          try {
+            if (typeof (this.rateLimiter as any).refund === 'function') {
+              await (this.rateLimiter as any).refund(this.name, 1);
+            } else {
+              await this.rateLimiter.release(this.name);
+            }
+          } catch {}
+        }
         if (this.activeConcurrency === 0) {
           this.emit('drained');
         }
@@ -721,31 +730,28 @@ export class FlowProducer {
     this.options = opts || {};
   }
 
+  private validateTree(node: FlowJob): void {
+    if (!node || typeof node !== 'object') {
+      throw new TypeError(`FlowProducer.add: Expected a flow job configuration object, received ${node === null ? 'null' : typeof node}`);
+    }
+    if (typeof node.queueName !== 'string' || node.queueName.trim().length === 0) {
+      throw new TypeError(`FlowProducer.add: Flow job requires a non-empty string for queueName, received ${typeof node.queueName}`);
+    }
+    if (typeof node.name !== 'string' || node.name.trim().length === 0) {
+      throw new TypeError(`FlowProducer.add: Flow job requires a non-empty string for name, received ${typeof node.name}`);
+    }
+    if (node.children && Array.isArray(node.children)) {
+      for (const child of node.children) {
+        this.validateTree(child);
+      }
+    }
+  }
+
   /**
    * Adds a hierarchical flow of jobs. Parent will not be dispatched until all children finish.
    */
   public async add<T = any>(flow: FlowJob<T>): Promise<FlowNode<T>> {
-    if (!flow || typeof flow !== 'object') {
-      throw new TypeError(
-        `FlowProducer.add: Expected a flow job configuration object, received ${
-          flow === null ? 'null' : typeof flow
-        }`
-      );
-    }
-    if (typeof flow.queueName !== 'string' || flow.queueName.trim().length === 0) {
-      throw new TypeError(
-        `FlowProducer.add: Flow job requires a non-empty string for queueName, received ${
-          flow.queueName === null ? 'null' : typeof flow.queueName
-        }`
-      );
-    }
-    if (typeof flow.name !== 'string' || flow.name.trim().length === 0) {
-      throw new TypeError(
-        `FlowProducer.add: Flow job requires a non-empty string for name, received ${
-          flow.name === null ? 'null' : typeof flow.name
-        }`
-      );
-    }
+    this.validateTree(flow);
 
     const parentQueue = new Queue<T>(flow.queueName, { connection: this.options.connection });
     await parentQueue.waitUntilReady();
@@ -762,16 +768,25 @@ export class FlowProducer {
     const childNodes: FlowNode[] = [];
 
     if (flow.children && flow.children.length > 0) {
-      // Register children count in native engine
-      parentQueue.binding.registerParentChildren(parentJob.id, flow.children.length);
-
-      for (const childFlow of flow.children) {
-        const childOpts: QueueJobOptions = {
-          ...childFlow.opts,
-          parent: { id: parentJob.id, queue: flow.queueName },
-        };
-        const childNode = await this.add({ ...childFlow, opts: childOpts });
-        childNodes.push(childNode);
+      let registeredCount = 0;
+      try {
+        for (const childFlow of flow.children) {
+          const childOpts: QueueJobOptions = {
+            ...childFlow.opts,
+            parent: { id: parentJob.id, queue: flow.queueName },
+          };
+          const childNode = await this.add({ ...childFlow, opts: childOpts });
+          childNodes.push(childNode);
+          registeredCount++;
+        }
+        parentQueue.binding.registerParentChildren(parentJob.id, registeredCount);
+      } catch (err) {
+        if (registeredCount > 0) {
+          parentQueue.binding.registerParentChildren(parentJob.id, registeredCount);
+        } else {
+          await parentQueue.binding.promote(parentJob.id);
+        }
+        throw err;
       }
     }
 

@@ -63,6 +63,13 @@ impl NativeRateLimiter {
         self.backend.release(&key).await.map_err(Into::into)
     }
 
+    /// Refunds tokens and releases concurrency permit (e.g. when an idle worker finds no work).
+    #[napi]
+    pub async fn refund(&self, key: String, tokens: Option<u32>) -> Result<()> {
+        let t = tokens.unwrap_or(1);
+        self.backend.refund(&key, t).await.map_err(Into::into)
+    }
+
     /// Queries current bucket status (available tokens, active concurrency) without consuming tokens.
     #[napi]
     pub async fn status(&self, key: String) -> Result<RateLimiterStatus> {
@@ -174,6 +181,7 @@ impl NativeQueue {
             config: conf,
             state: if delay_ms > 0 { JobState::Delayed } else { JobState::Waiting },
             attempts_made: 0,
+            stalled_count: 0,
             progress: 0,
             created_at: now,
             processed_at: None,
@@ -206,6 +214,7 @@ impl NativeQueue {
                 config: conf,
                 state: if delay_ms > 0 { JobState::Delayed } else { JobState::Waiting },
                 attempts_made: 0,
+                stalled_count: 0,
                 progress: 0,
                 created_at: now,
                 processed_at: None,

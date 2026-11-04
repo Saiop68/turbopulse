@@ -95,8 +95,8 @@ export class Job<TData = any, TResult = any> {
   /**
    * Fetches latest job state from native engine
    */
-  public async getState(): Promise<JobState> {
+  public async getState(): Promise<JobState | undefined> {
     const latest = await this.nativeQueue.getJob(this.id);
-    return latest ? latest.state : JobState.Failed;
+    return latest ? latest.state : undefined;
   }
 }

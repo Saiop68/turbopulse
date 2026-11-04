@@ -46,6 +46,12 @@ pub trait RateLimiterBackend: Send + Sync {
         key: &str,
     ) -> Result<u32, TurboPulseError>;
 
+    async fn refund(
+        &self,
+        key: &str,
+        tokens: u32,
+    ) -> Result<(), TurboPulseError>;
+
     async fn status(
         &self,
         key: &str,

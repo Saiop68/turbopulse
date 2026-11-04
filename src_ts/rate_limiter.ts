@@ -560,15 +560,26 @@ export class RateLimiter extends EventEmitter {
     return new Promise<Ticket>((resolve, reject) => {
       this.schedule(opts, () => {
         return new Promise<void>((taskResolve) => {
+          let released = false;
+          let expirationTimer: NodeJS.Timeout | null = null;
+
+          const releaseTicket = () => {
+            if (!released) {
+              released = true;
+              if (expirationTimer) clearTimeout(expirationTimer);
+              taskResolve();
+            }
+          };
+
+          if (opts.expiration && opts.expiration > 0) {
+            expirationTimer = setTimeout(releaseTicket, opts.expiration);
+          }
+
           const ticket: Ticket = {
             id: opts.id || Math.random().toString(36).substring(2, 9),
             allowed: true,
-            release: async () => {
-              taskResolve();
-            },
-            done: async () => {
-              taskResolve();
-            },
+            release: async () => { releaseTicket(); },
+            done: async () => { releaseTicket(); },
           };
           resolve(ticket);
         });
@@ -588,21 +599,25 @@ export class RateLimiter extends EventEmitter {
     await this.readyPromise;
     if (this.nativeLimiter && typeof this.nativeLimiter.acquire === 'function') {
       const res = await this.nativeLimiter.acquire(this.id, weight);
+      let released = false;
+      const releaseTicket = async () => {
+        if (!released) {
+          released = true;
+          if (res.allowed) {
+            try {
+              await this.nativeLimiter.release(this.id);
+            } catch {}
+          }
+        }
+      };
+
       return {
         id: Math.random().toString(36).substring(2, 9),
         allowed: res.allowed,
         remaining: res.remaining,
         retryAfterMs: res.retryAfterMs,
-        release: async () => {
-          if (res.allowed) {
-            await this.nativeLimiter.release(this.id);
-          }
-        },
-        done: async () => {
-          if (res.allowed) {
-            await this.nativeLimiter.release(this.id);
-          }
-        },
+        release: releaseTicket,
+        done: releaseTicket,
       };
     }
     return {

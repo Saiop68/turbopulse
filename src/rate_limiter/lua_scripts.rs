@@ -25,12 +25,11 @@ if tokens == nil then
     active = 0
 else
     local elapsed = now - last_refill
-    if elapsed > 0 then
-        local intervals = math.floor(elapsed / refill_interval)
-        if intervals > 0 then
-            local refilled = intervals * refill_rate
+    if elapsed > 0 and refill_interval > 0 then
+        local refilled = (elapsed / refill_interval) * refill_rate
+        if refilled > 0 then
             tokens = math.min(capacity, tokens + refilled)
-            last_refill = last_refill + (intervals * refill_interval)
+            last_refill = now
         end
     end
 end
@@ -81,6 +80,26 @@ if active > 0 then
     active = active - 1
     redis.call('HSET', key, 'active', active)
 end
+local ttl_seconds = tonumber(ARGV[1]) or 60
+redis.call('EXPIRE', key, ttl_seconds)
+return active
+"#;
+
+/// Redis Lua Script to atomically refund tokens and decrement concurrency
+pub const REFUND_PERMIT_LUA: &str = r#"
+local key = KEYS[1]
+local tokens_to_refund = tonumber(ARGV[1]) or 1
+local ttl_seconds = tonumber(ARGV[2]) or 60
+
+local active = tonumber(redis.call('HGET', key, 'active') or 0)
+if active > 0 then
+    active = active - 1
+    redis.call('HSET', key, 'active', active)
+end
+
+local tokens = tonumber(redis.call('HGET', key, 'tokens') or 0)
+redis.call('HSET', key, 'tokens', tokens + tokens_to_refund)
+redis.call('EXPIRE', key, ttl_seconds)
 return active
 "#;
 

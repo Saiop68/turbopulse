@@ -23,8 +23,12 @@ redis.call('SET', job_key, job_data)
 if delay_until > now then
     redis.call('ZADD', delayed_key, delay_until, job_id)
 else
-    -- Using ZADD with priority: higher priority gets popped first via ZPOPMAX
-    redis.call('ZADD', wait_key, priority, job_id)
+    -- Composite score guarantees:
+    -- 1. Higher priority jobs pop first (via ZPOPMAX)
+    -- 2. Equal priority jobs strictly preserve FIFO arrival order
+    local fifo_tiebreaker = 1000000000000 - (now % 1000000000000)
+    local score = (priority * 1000000000000) + fifo_tiebreaker
+    redis.call('ZADD', wait_key, score, job_id)
 end
 
 return 1
@@ -51,7 +55,9 @@ for i = 1, count do
     if delay_until > now then
         redis.call('ZADD', delayed_key, delay_until, job_id)
     else
-        redis.call('ZADD', wait_key, priority, job_id)
+        local fifo_tiebreaker = 1000000000000 - (now % 1000000000000) + (count - i)
+        local score = (priority * 1000000000000) + fifo_tiebreaker
+        redis.call('ZADD', wait_key, score, job_id)
     end
 end
 
@@ -78,7 +84,8 @@ end
 local ready_delayed = redis.call('ZRANGEBYSCORE', delayed_key, 0, now, 'LIMIT', 0, 100)
 for _, id in ipairs(ready_delayed) do
     redis.call('ZREM', delayed_key, id)
-    redis.call('ZADD', wait_key, 0, id)
+    local fifo_tiebreaker = 1000000000000 - (now % 1000000000000)
+    redis.call('ZADD', wait_key, fifo_tiebreaker, id)
 end
 
 -- 2. Pop up to batch_size waiting jobs
@@ -115,9 +122,25 @@ redis.call('ZADD', completed_key, now, job_id)
 
 local raw = redis.call('GET', job_key)
 if raw then
-    local updated = string.gsub(raw, '"state":"%a+"', '"state":"completed"')
-    updated = string.gsub(updated, '"finished_at":null', '"finished_at":' .. now)
-    redis.call('SET', job_key, updated)
+    local ok, data = pcall(cjson.decode, raw)
+    if ok and type(data) == 'table' then
+        data['state'] = 'Completed'
+        data['finished_at'] = now
+        data['progress'] = 100
+        if return_val and #return_val > 0 then
+            local ok_ret, parsed_ret = pcall(cjson.decode, return_val)
+            if ok_ret then
+                data['return_value'] = parsed_ret
+            else
+                data['return_value'] = return_val
+            end
+        end
+        redis.call('SET', job_key, cjson.encode(data))
+    else
+        local updated = string.gsub(raw, '"state":"%a+"', '"state":"Completed"')
+        updated = string.gsub(updated, '"finished_at":null', '"finished_at":' .. now)
+        redis.call('SET', job_key, updated)
+    end
     return 1
 end
 return 0
@@ -130,20 +153,39 @@ local failed_key = KEYS[3]
 local job_key = KEYS[4]
 
 local job_id = ARGV[1]
-local retry_delay = tonumber(ARGV[2])
-local is_final = tonumber(ARGV[3])
-local now = tonumber(ARGV[4])
+local error_msg = ARGV[2]
+local retry_delay = tonumber(ARGV[3]) or 0
+local is_final = tonumber(ARGV[4]) or 0
+local now = tonumber(ARGV[5])
 
 redis.call('ZREM', active_key, job_id)
 
-if is_final == 1 then
-    redis.call('ZADD', failed_key, now, job_id)
-else
-    local delay_until = now + retry_delay
-    redis.call('ZADD', delayed_key, delay_until, job_id)
+local raw = redis.call('GET', job_key)
+if raw then
+    local ok, data = pcall(cjson.decode, raw)
+    if ok and type(data) == 'table' then
+        data['failed_reason'] = error_msg
+        if is_final == 1 then
+            data['state'] = 'Failed'
+            data['finished_at'] = now
+            redis.call('ZADD', failed_key, now, job_id)
+        else
+            data['state'] = 'Delayed'
+            local delay_until = now + retry_delay
+            data['delay_until_ms'] = delay_until
+            redis.call('ZADD', delayed_key, delay_until, job_id)
+        end
+        redis.call('SET', job_key, cjson.encode(data))
+    else
+        if is_final == 1 then
+            redis.call('ZADD', failed_key, now, job_id)
+        else
+            redis.call('ZADD', delayed_key, now + retry_delay, job_id)
+        end
+    end
+    return 1
 end
-
-return 1
+return 0
 "#;
 
 pub struct RedisQueue {
@@ -335,37 +377,28 @@ impl RedisQueue {
 
         let raw = self.backend.get(&key).await?;
         if let Some(s) = raw {
-            if let Ok(mut job) = serde_json::from_str::<JobRecord>(&s) {
+            if let Ok(job) = serde_json::from_str::<JobRecord>(&s) {
                 let max_retries = job.config.max_retries.unwrap_or(3);
                 let will_retry = job.attempts_made < max_retries;
 
-                let (retry_delay, is_final) = if will_retry {
+                let (retry_delay, is_final, reason_str) = if will_retry {
                     let backoff_type = job.config.backoff_type.unwrap_or(BackoffType::Exponential);
                     let base_ms = job.config.backoff_base_ms.unwrap_or(1000) as u64;
                     let max_ms = job.config.backoff_max_ms.unwrap_or(60000) as u64;
                     let jitter = job.config.jitter.unwrap_or(true);
                     let delay = calculate_backoff(job.attempts_made, backoff_type, base_ms, max_ms, jitter);
 
-                    job.state = JobState::Delayed;
-                    job.delay_until_ms = now + delay;
-                    job.failed_reason = Some(format!("Retry {}/{}: {}", job.attempts_made, max_retries, error_msg));
-                    (delay, 0)
+                    (delay, 0, format!("Retry {}/{}: {}", job.attempts_made, max_retries, error_msg))
                 } else {
-                    job.state = JobState::Failed;
-                    job.finished_at = Some(now);
-                    job.failed_reason = Some(error_msg.to_string());
-                    (0, 1)
+                    (0, 1, error_msg.to_string())
                 };
-
-                if let Ok(updated) = serde_json::to_string(&job) {
-                    let _ = self.backend.set(&key, &updated).await;
-                }
 
                 let mut inv = self.fail_script.key(self.active_key(queue_name));
                 inv.key(self.delayed_key(queue_name))
                     .key(self.failed_key(queue_name))
                     .key(&key)
                     .arg(job_id)
+                    .arg(reason_str)
                     .arg(retry_delay)
                     .arg(is_final)
                     .arg(now);
@@ -410,11 +443,11 @@ impl RedisQueue {
     }
 
     pub async fn get_counts(&self, queue_name: &str) -> Result<JobCounts, TurboPulseError> {
-        let wait = self.backend.zcard(&self.wait_key(queue_name)).await.unwrap_or(0);
-        let active = self.backend.zcard(&self.active_key(queue_name)).await.unwrap_or(0);
-        let delayed = self.backend.zcard(&self.delayed_key(queue_name)).await.unwrap_or(0);
-        let completed = self.backend.zcard(&self.completed_key(queue_name)).await.unwrap_or(0);
-        let failed = self.backend.zcard(&self.failed_key(queue_name)).await.unwrap_or(0);
+        let wait = self.backend.zcard(&self.wait_key(queue_name)).await?;
+        let active = self.backend.zcard(&self.active_key(queue_name)).await?;
+        let delayed = self.backend.zcard(&self.delayed_key(queue_name)).await?;
+        let completed = self.backend.zcard(&self.completed_key(queue_name)).await?;
+        let failed = self.backend.zcard(&self.failed_key(queue_name)).await?;
 
         Ok(JobCounts {
             waiting: wait,

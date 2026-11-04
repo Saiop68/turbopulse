@@ -114,6 +114,13 @@ export class LeasedRateLimiter {
     try {
       const res = await this.native.acquire(this.key, amount);
       if (res.allowed) {
+        // Release the distributed concurrency permit immediately in Redis
+        // because the lease batch reserves token quota, while concurrent tasks
+        // are tracked and released within the local micro-reservoir.
+        try {
+          await this.native.release(this.key);
+        } catch {}
+
         this.localReservoir += amount;
         this.lastKnownRetryAfterMs = 0;
         return {

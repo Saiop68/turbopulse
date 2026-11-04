@@ -117,6 +117,7 @@ export interface JobDto {
   data: Buffer
   state: JobState
   attemptsMade: number
+  stalledCount: number
   progress: number
   createdAt: number
   processedAt?: number
@@ -160,6 +161,8 @@ export declare class NativeRateLimiter {
   acquireSync(key: string, tokens?: number | undefined | null): RateLimitResult
   /** Releases concurrency permit upon job or operation completion. */
   release(key: string): Promise<number>
+  /** Refunds tokens and releases concurrency permit (e.g. when an idle worker finds no work). */
+  refund(key: string, tokens?: number | undefined | null): Promise<void>
   /** Queries current bucket status (available tokens, active concurrency) without consuming tokens. */
   status(key: string): Promise<RateLimiterStatus>
   /** Resets rate limiter state for a key. */

@@ -95,12 +95,12 @@ impl RedisBackend {
         match self {
             RedisBackend::Standalone(m) => {
                 let mut conn = m.clone();
-                let count: u32 = conn.zcard(key).await.unwrap_or(0);
+                let count: u32 = conn.zcard(key).await.map_err(TurboPulseError::Redis)?;
                 Ok(count)
             }
             RedisBackend::Cluster(c) => {
                 let mut conn = c.clone();
-                let count: u32 = conn.zcard(key).await.unwrap_or(0);
+                let count: u32 = conn.zcard(key).await.map_err(TurboPulseError::Redis)?;
                 Ok(count)
             }
         }
@@ -146,7 +146,7 @@ impl RedisBackend {
                 let res: Vec<String> = conn
                     .zrangebyscore_limit(key, min, max, offset, count)
                     .await
-                    .unwrap_or_default();
+                    .map_err(TurboPulseError::Redis)?;
                 Ok(res)
             }
             RedisBackend::Cluster(c) => {
@@ -154,7 +154,7 @@ impl RedisBackend {
                 let res: Vec<String> = conn
                     .zrangebyscore_limit(key, min, max, offset, count)
                     .await
-                    .unwrap_or_default();
+                    .map_err(TurboPulseError::Redis)?;
                 Ok(res)
             }
         }

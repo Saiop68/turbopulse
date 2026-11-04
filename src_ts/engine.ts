@@ -116,6 +116,9 @@ export function getSharedRedisEngine(target: any = 'redis://127.0.0.1:6379'): Pr
       mode: EngineMode.Redis,
       redisUrl,
       keyPrefix: 'turbopulse',
+    }).catch((err) => {
+      sharedRedisEngines.delete(redisUrl);
+      throw err;
     });
     sharedRedisEngines.set(redisUrl, existing);
   }
@@ -279,4 +282,22 @@ export class TurboPulse {
   public get mode(): EngineMode {
     return this.nativeEngine.mode;
   }
+}
+
+/**
+ * Synchronously creates an in-memory TurboPulse engine instance.
+ */
+export function createInMemoryTurboPulse(): TurboPulse {
+  const EngineClass = getNativeEngine();
+  return TurboPulse.createInMemory(EngineClass);
+}
+
+/**
+ * Asynchronously creates a TurboPulse engine instance (InMemory or Redis).
+ */
+export async function createTurboPulse(
+  config: EngineConfig = { mode: EngineMode.InMemory }
+): Promise<TurboPulse> {
+  const EngineClass = getNativeEngine();
+  return TurboPulse.create(EngineClass, config);
 }

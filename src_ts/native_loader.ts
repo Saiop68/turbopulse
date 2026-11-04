@@ -17,12 +17,11 @@ export function getNativeBinding(): any {
     }
   } catch {}
 
-  // 2. Scan candidate directories for platform-specific turbopulse.*.node
+  // 2. Scan package-relative directories for platform-specific turbopulse.*.node
   const candidateDirs = [
     path.resolve(__dirname, '..'),
     path.resolve(__dirname),
-    path.resolve(process.cwd()),
-    path.resolve(process.cwd(), 'build', 'Release'),
+    path.resolve(__dirname, '..', '..'),
   ];
 
   for (const dir of candidateDirs) {

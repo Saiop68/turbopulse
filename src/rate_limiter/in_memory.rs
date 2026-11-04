@@ -81,7 +81,7 @@ impl InMemoryRateLimiter {
 
         let mut res_guard = bucket.reservoir.lock();
         let current = res_guard.or(default_res).unwrap_or(0);
-        let updated = current + amount;
+        let updated = current.saturating_add(amount);
         *res_guard = Some(updated);
         updated
     }
@@ -150,21 +150,33 @@ impl InMemoryRateLimiter {
 
         bucket.last_accessed_ms.store(now, Ordering::Relaxed);
 
-        let active = bucket.active_concurrency.load(Ordering::SeqCst);
-
-        // 1. Concurrency limit check
-        if let Some(max_conc) = config.max_concurrent {
-            if active >= max_conc {
-                let current_tokens = *bucket.tokens.lock();
-                return Ok(RateLimitResult {
-                    allowed: false,
-                    remaining: current_tokens.floor() as u32,
-                    retry_after_ms: 25, // Quick backoff to poll for concurrency release
-                    current_concurrency: active,
-                    reason: "CONCURRENCY_LIMIT".to_string(),
-                });
+        // 1. Atomic Concurrency Reservation via Compare-and-Swap (CAS) loop
+        // Guarantees zero race condition under high parallelism
+        let mut curr_active = bucket.active_concurrency.load(Ordering::Acquire);
+        loop {
+            if let Some(max_conc) = config.max_concurrent {
+                if curr_active >= max_conc {
+                    let current_tokens = *bucket.tokens.lock();
+                    return Ok(RateLimitResult {
+                        allowed: false,
+                        remaining: current_tokens.floor() as u32,
+                        retry_after_ms: 25,
+                        current_concurrency: curr_active,
+                        reason: "CONCURRENCY_LIMIT".to_string(),
+                    });
+                }
+            }
+            match bucket.active_concurrency.compare_exchange_weak(
+                curr_active,
+                curr_active + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => curr_active = actual,
             }
         }
+        let reserved_concurrency = curr_active + 1;
 
         // Lock bucket for atomic token, min_time, and reservoir evaluation
         let mut tokens_guard = bucket.tokens.lock();
@@ -188,13 +200,16 @@ impl InMemoryRateLimiter {
                 let incr_amt = config.reservoir_increase_amount.unwrap_or(1) as i32;
                 let max_amt = config.reservoir_increase_maximum.unwrap_or(config.capacity) as i32;
                 let current = reservoir_guard.unwrap_or(0);
-                *reservoir_guard = Some((current + incr_amt).min(max_amt));
+                *reservoir_guard = Some(current.saturating_add(incr_amt).min(max_amt));
                 *last_res_incr_guard = now;
             }
         }
 
         if let Some(current_res) = *reservoir_guard {
             if current_res < tokens_requested as i32 {
+                // Rollback concurrency reservation before returning
+                bucket.active_concurrency.fetch_sub(1, Ordering::Release);
+
                 let wait_ms = config.reservoir_refresh_interval_ms
                     .map(|interval| (interval as u64).saturating_sub(now.saturating_sub(*last_res_refresh_guard)).max(1) as u32)
                     .unwrap_or(100);
@@ -203,7 +218,7 @@ impl InMemoryRateLimiter {
                     allowed: false,
                     remaining: 0,
                     retry_after_ms: wait_ms,
-                    current_concurrency: active,
+                    current_concurrency: curr_active,
                     reason: "RESERVOIR_EMPTY".to_string(),
                 });
             }
@@ -213,12 +228,15 @@ impl InMemoryRateLimiter {
         if let Some(min_time) = config.min_time_ms {
             let last_exec = *last_exec_guard;
             if last_exec > 0 && now.saturating_sub(last_exec) < min_time as u64 {
+                // Rollback concurrency reservation before returning
+                bucket.active_concurrency.fetch_sub(1, Ordering::Release);
+
                 let wait_time = (min_time as u64).saturating_sub(now.saturating_sub(last_exec));
                 return Ok(RateLimitResult {
                     allowed: false,
                     remaining: tokens_guard.floor() as u32,
                     retry_after_ms: wait_time.max(1) as u32,
-                    current_concurrency: active,
+                    current_concurrency: curr_active,
                     reason: "MIN_TIME_LIMIT".to_string(),
                 });
             }
@@ -237,6 +255,9 @@ impl InMemoryRateLimiter {
 
         let needed = tokens_requested as f64;
         if *tokens_guard < needed {
+            // Rollback concurrency reservation before returning
+            bucket.active_concurrency.fetch_sub(1, Ordering::Release);
+
             let missing = needed - *tokens_guard;
             let interval_ms = config.refill_interval_ms as f64;
             let rate = config.refill_rate.max(1) as f64;
@@ -247,24 +268,23 @@ impl InMemoryRateLimiter {
                 allowed: false,
                 remaining: tokens_guard.floor() as u32,
                 retry_after_ms: (wait_time + cool_down).max(1) as u32,
-                current_concurrency: active,
+                current_concurrency: curr_active,
                 reason: "RATE_LIMIT".to_string(),
             });
         }
 
-        // All checks passed: Deduct reservoir, deduct tokens, increment active concurrency, and update last execution timestamp
+        // All checks passed: Deduct reservoir, deduct tokens, and update last execution timestamp
         if let Some(current_res) = *reservoir_guard {
-            *reservoir_guard = Some(current_res - tokens_requested as i32);
+            *reservoir_guard = Some(current_res.saturating_sub(tokens_requested as i32));
         }
         *tokens_guard -= needed;
         *last_exec_guard = now;
-        let new_active = bucket.active_concurrency.fetch_add(1, Ordering::SeqCst) + 1;
 
         Ok(RateLimitResult {
             allowed: true,
             remaining: tokens_guard.floor() as u32,
             retry_after_ms: 0,
-            current_concurrency: new_active,
+            current_concurrency: reserved_concurrency,
             reason: "OK".to_string(),
         })
     }
@@ -291,6 +311,19 @@ impl RateLimiterBackend for InMemoryRateLimiter {
             return Ok(val.unwrap_or(0).saturating_sub(1));
         }
         Ok(0)
+    }
+
+    async fn refund(&self, key: &str, tokens: u32) -> Result<(), TurboPulseError> {
+        if let Some(bucket) = self.buckets.get(key) {
+            let _ = bucket.active_concurrency.fetch_update(
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+                |curr| Some(curr.saturating_sub(1)),
+            );
+            let mut tokens_guard = bucket.tokens.lock();
+            *tokens_guard += tokens as f64;
+        }
+        Ok(())
     }
 
     async fn status(
