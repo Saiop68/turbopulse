@@ -1,4 +1,4 @@
-import { createInMemoryTurboPulse } from '../index';
+import { createInMemoryTurboPulse } from '../dist/index';
 
 // ============================================================================
 // ANSI Color & Styling Utilities for Terminal Dashboard

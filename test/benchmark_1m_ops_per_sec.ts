@@ -1,4 +1,4 @@
-import { createInMemoryTurboPulse, createTurboPulse, EngineMode } from '../index';
+import { createInMemoryTurboPulse, createTurboPulse, EngineMode } from '../dist/index';
 
 // ============================================================================
 // ANSI Color & Styling Utilities

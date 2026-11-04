@@ -1,5 +1,5 @@
 import * as net from 'net';
-import { createTurboPulse, EngineMode } from '../index';
+import { createTurboPulse, EngineMode } from '../dist/index';
 
 // ============================================================================
 // ANSI Styling
