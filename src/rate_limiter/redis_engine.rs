@@ -87,6 +87,7 @@ impl RateLimiterBackend for RedisRateLimiter {
         let mut inv = self.refund_script.key(&redis_key);
         inv.arg(tokens);
         inv.arg(60);
+        inv.arg(1000);
         let _: i64 = self.backend.invoke_script(&inv).await?;
         Ok(())
     }

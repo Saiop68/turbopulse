@@ -21,6 +21,7 @@ turbopulse.*.node
 
 # Temporary, Scratch & Archives
 scratch/
+scripts/
 *.tar.gz
 *.tgz
 *.zip

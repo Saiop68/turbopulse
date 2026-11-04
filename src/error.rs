@@ -32,11 +32,17 @@ pub enum TurboPulseError {
 
     #[error("Worker error: {0}")]
     Worker(String),
+
+    #[error("Invalid job state or lock lost: {0}")]
+    InvalidJobState(String),
 }
 
 impl From<TurboPulseError> for napi::Error {
     fn from(err: TurboPulseError) -> Self {
         match &err {
+            TurboPulseError::InvalidJobState(msg) => {
+                napi::Error::new(Status::GenericFailure, format!("LOCK_LOST: {}", msg))
+            }
             TurboPulseError::RateLimitExceeded { retry_after_ms: _, .. } => {
                 napi::Error::new(
                     Status::GenericFailure,

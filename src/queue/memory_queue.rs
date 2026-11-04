@@ -202,6 +202,8 @@ impl InMemoryQueue {
                     job.state = JobState::Active;
                     job.attempts_made += 1;
                     job.processed_at = Some(now);
+                    let lock_token = format!("{}-{}", now, uuid::Uuid::new_v4());
+                    job.lock_token = Some(lock_token);
 
                     q.active_ids.insert(p_job.job_id.clone(), now);
                     return Ok(Some(job.clone()));
@@ -217,17 +219,27 @@ impl InMemoryQueue {
         queue_name: &str,
         job_id: &str,
         return_value: Option<Vec<u8>>,
-    ) -> Result<(), TurboPulseError> {
+        lock_token: Option<&str>,
+    ) -> Result<bool, TurboPulseError> {
         let q = self.get_or_create_queue(queue_name);
         let now = current_time_ms();
-
-        q.active_ids.remove(job_id);
 
         let mut repeat_to_schedule: Option<JobRecord> = None;
         let mut parent_to_promote: Option<String> = None;
         let mut remove_now = false;
 
         if let Some(mut job) = self.jobs.get_mut(job_id) {
+            if let Some(token) = lock_token {
+                if !token.is_empty() {
+                    if let Some(ref current) = job.lock_token {
+                        if current != token {
+                            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost or expired".to_string()));
+                        }
+                    }
+                }
+            }
+
+            q.active_ids.remove(job_id);
             job.state = JobState::Completed;
             job.finished_at = Some(now);
             job.return_value = return_value;
@@ -283,7 +295,7 @@ impl InMemoryQueue {
             let _ = self.promote(&parent_queue, &p_id);
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// Fails job; if retries remain, schedules retry with exponential backoff; else marks failed.
@@ -293,15 +305,26 @@ impl InMemoryQueue {
         queue_name: &str,
         job_id: &str,
         error_msg: &str,
+        lock_token: Option<&str>,
     ) -> Result<bool, TurboPulseError> {
         let q = self.get_or_create_queue(queue_name);
         let now = current_time_ms();
-        q.active_ids.remove(job_id);
 
         let mut remove_now = false;
         let mut is_final = false;
 
         if let Some(mut job) = self.jobs.get_mut(job_id) {
+            if let Some(token) = lock_token {
+                if !token.is_empty() {
+                    if let Some(ref current) = job.lock_token {
+                        if current != token {
+                            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost or expired".to_string()));
+                        }
+                    }
+                }
+            }
+
+            q.active_ids.remove(job_id);
             let max_retries = job.config.max_retries.unwrap_or(3);
             if job.attempts_made < max_retries {
                 // Compute backoff
@@ -368,6 +391,33 @@ impl InMemoryQueue {
         } else {
             false
         }
+    }
+
+    /// Renews active lock on an executing job (heartbeat)
+    pub fn renew_lock(
+        &self,
+        queue_name: &str,
+        job_id: &str,
+        lock_token: &str,
+        _lock_duration_ms: u32,
+    ) -> Result<bool, TurboPulseError> {
+        let q = self.get_or_create_queue(queue_name);
+        let now = current_time_ms();
+        if let Some(job) = self.jobs.get(job_id) {
+            if job.state != JobState::Active {
+                return Ok(false);
+            }
+            if !lock_token.is_empty() {
+                if let Some(ref current) = job.lock_token {
+                    if current != lock_token {
+                        return Ok(false);
+                    }
+                }
+            }
+            q.active_ids.insert(job_id.to_string(), now);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Cleans jobs older than grace_ms in the specified state ('completed', 'failed', 'wait')

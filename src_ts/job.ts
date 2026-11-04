@@ -18,6 +18,8 @@ export class Job<TData = any, TResult = any> {
   public finishedOn?: number;
   public failedReason?: string;
   public returnvalue?: TResult;
+  public lockToken?: string;
+  public stalledCount: number = 0;
   private nativeQueue: NativeQueueBinding;
 
   constructor(dto: JobDto, nativeQueue: NativeQueueBinding, opts: JobOptions = {}) {
@@ -27,6 +29,8 @@ export class Job<TData = any, TResult = any> {
     this.opts = opts;
     this.state = dto.state;
     this.attemptsMade = dto.attemptsMade;
+    this.stalledCount = dto.stalledCount ?? 0;
+    this.lockToken = dto.lockToken;
     this.progress = dto.progress;
     this.timestamp = dto.createdAt;
     this.processedOn = dto.processedAt;

@@ -166,21 +166,53 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
         const job = new Job<TData, TResult>(dto, this.nativeQueue);
         this.emit('active', job);
 
+        const lockDuration = 30000;
+        const lockRenewInterval = Math.max(100, Math.floor(lockDuration / 3));
+        let heartbeatTimer: NodeJS.Timeout | null = null;
+        let lockLost = false;
+
+        if (job.lockToken) {
+          heartbeatTimer = setInterval(async () => {
+            try {
+              const renewed = await this.nativeQueue.renewLock(job.id, job.lockToken!, lockDuration);
+              if (!renewed) {
+                lockLost = true;
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+                this.emit('error', new Error(`LOCK_LOST: Worker lost lock for job ${job.id}`));
+              }
+            } catch {
+              lockLost = true;
+              if (heartbeatTimer) clearInterval(heartbeatTimer);
+            }
+          }, lockRenewInterval);
+        }
+
         try {
           const result = await this.processor(job);
+          if (lockLost) {
+            throw new Error(`LOCK_LOST: Job ${job.id} was recovered by another worker while executing`);
+          }
           const returnBuf = Job.serializePayload(result);
-          await this.nativeQueue.complete(job.id, returnBuf);
+          await this.nativeQueue.complete(job.id, returnBuf, job.lockToken || null);
           this.emit('completed', job, result);
         } catch (err: any) {
           const errorMsg = err?.message || String(err);
-          const permanentlyFailed = await this.nativeQueue.fail(job.id, errorMsg);
-
-          if (permanentlyFailed) {
-            this.emit('failed', job, err);
+          if (!lockLost) {
+            try {
+              const permanentlyFailed = await this.nativeQueue.fail(job.id, errorMsg, job.lockToken || null);
+              if (permanentlyFailed) {
+                this.emit('failed', job, err);
+              } else {
+                this.emit('retry', job, err);
+              }
+            } catch {
+              this.emit('failed', job, err);
+            }
           } else {
-            this.emit('retry', job, err);
+            this.emit('failed', job, err);
           }
         } finally {
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
           this.activeJobs--;
           if (this.rateLimiter && this.nativeLimiter) {
             await this.nativeLimiter.release(`worker:${this.name}`);

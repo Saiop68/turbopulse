@@ -189,6 +189,7 @@ impl NativeQueue {
             failed_reason: None,
             return_value: None,
             delay_until_ms: now + delay_ms,
+            lock_token: None,
         };
 
         self.engine.push_job(record).await.map_err(Into::<napi::Error>::into)?;
@@ -222,6 +223,7 @@ impl NativeQueue {
                 failed_reason: None,
                 return_value: None,
                 delay_until_ms: now + delay_ms,
+                lock_token: None,
             });
         }
 
@@ -244,16 +246,23 @@ impl NativeQueue {
 
     /// Marks job as completed and stores optional binary result.
     #[napi]
-    pub async fn complete(&self, job_id: String, return_value: Option<Buffer>) -> Result<()> {
+    pub async fn complete(&self, job_id: String, return_value: Option<Buffer>, lock_token: Option<String>) -> Result<bool> {
         let val = return_value.map(|b| b.as_ref().to_vec());
-        self.engine.complete_job(&self.name, &job_id, val).await.map_err(Into::<napi::Error>::into)
+        self.engine.complete_job(&self.name, &job_id, val, lock_token.as_deref()).await.map_err(Into::<napi::Error>::into)
     }
 
     /// Fails job. If retries remain, automatically calculates backoff with jitter and re-schedules.
     /// Returns true if permanently failed; false if retry scheduled.
     #[napi]
-    pub async fn fail(&self, job_id: String, error_msg: String) -> Result<bool> {
-        self.engine.fail_job(&self.name, &job_id, &error_msg).await.map_err(Into::<napi::Error>::into)
+    pub async fn fail(&self, job_id: String, error_msg: String, lock_token: Option<String>) -> Result<bool> {
+        self.engine.fail_job(&self.name, &job_id, &error_msg, lock_token.as_deref()).await.map_err(Into::<napi::Error>::into)
+    }
+
+    /// Renews active lock on an executing job (heartbeat).
+    #[napi]
+    pub async fn renew_lock(&self, job_id: String, lock_token: String, lock_duration_ms: Option<u32>) -> Result<bool> {
+        let duration = lock_duration_ms.unwrap_or(30000);
+        self.engine.renew_lock(&self.name, &job_id, &lock_token, duration).await.map_err(Into::<napi::Error>::into)
     }
 
     /// Updates progress percentage (0 - 100) for a job.
@@ -323,9 +332,8 @@ impl NativeQueue {
 
     /// Registers parent with children count for DAG FlowProducer
     #[napi]
-    pub fn register_parent_children(&self, parent_id: String, count: u32) -> Result<()> {
-        self.engine.register_parent_children(&parent_id, count);
-        Ok(())
+    pub async fn register_parent_children(&self, parent_id: String, count: u32) -> Result<()> {
+        self.engine.register_parent_children(&self.name, &parent_id, count).await.map_err(Into::<napi::Error>::into)
     }
 }
 

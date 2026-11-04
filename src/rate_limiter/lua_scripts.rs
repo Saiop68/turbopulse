@@ -90,6 +90,7 @@ pub const REFUND_PERMIT_LUA: &str = r#"
 local key = KEYS[1]
 local tokens_to_refund = tonumber(ARGV[1]) or 1
 local ttl_seconds = tonumber(ARGV[2]) or 60
+local capacity = tonumber(ARGV[3]) or 1000
 
 local active = tonumber(redis.call('HGET', key, 'active') or 0)
 if active > 0 then
@@ -98,7 +99,11 @@ if active > 0 then
 end
 
 local tokens = tonumber(redis.call('HGET', key, 'tokens') or 0)
-redis.call('HSET', key, 'tokens', tokens + tokens_to_refund)
+local new_tokens = tokens + tokens_to_refund
+if capacity > 0 and new_tokens > capacity then
+    new_tokens = capacity
+end
+redis.call('HSET', key, 'tokens', new_tokens)
 redis.call('EXPIRE', key, ttl_seconds)
 return active
 "#;

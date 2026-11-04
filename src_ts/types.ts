@@ -160,12 +160,14 @@ export interface JobDto {
   data: Buffer;
   state: JobState;
   attemptsMade: number;
+  stalledCount?: number;
   progress: number;
   createdAt: number;
   processedAt?: number;
   finishedAt?: number;
   failedReason?: string;
   returnValue?: Buffer;
+  lockToken?: string;
 }
 
 export interface QueueJobOptions {
@@ -266,8 +268,9 @@ export interface NativeQueueBinding {
   addBulk(items: BulkJobInput[]): Promise<string[]>;
   fetchNext(): Promise<JobDto | null>;
   fetchBatch(count: number): Promise<JobDto[]>;
-  complete(jobId: string, returnValue?: Buffer | null): Promise<void>;
-  fail(jobId: string, errorMsg: string): Promise<boolean>;
+  complete(jobId: string, returnValue?: Buffer | null, lockToken?: string | null): Promise<boolean>;
+  fail(jobId: string, errorMsg: string, lockToken?: string | null): Promise<boolean>;
+  renewLock(jobId: string, lockToken: string, lockDurationMs?: number): Promise<boolean>;
   updateProgress(jobId: string, progress: number): Promise<void>;
   getJob(jobId: string): Promise<JobDto | null>;
   getCounts(): Promise<JobCounts>;
@@ -278,6 +281,6 @@ export interface NativeQueueBinding {
   promote(jobId: string): Promise<boolean>;
   recoverStalled(lockDurationMs: number, maxStalled?: number): Promise<number>;
   updateData(jobId: string, data: Buffer): Promise<void>;
-  registerParentChildren(parentId: string, count: number): void;
+  registerParentChildren(parentId: string, count: number): Promise<void> | void;
 }
 

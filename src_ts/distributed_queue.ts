@@ -29,6 +29,8 @@ export class Job<DataType = any, ResultType = any, NameType extends string = str
   public opts: QueueJobOptions;
   public progress: number = 0;
   public attemptsMade: number = 0;
+  public stalledCount: number = 0;
+  public lockToken?: string;
   public returnvalue: ResultType = null as any;
 
   public get returnValue(): ResultType {
@@ -69,6 +71,8 @@ export class Job<DataType = any, ResultType = any, NameType extends string = str
 
     if (dto) {
       this.attemptsMade = dto.attemptsMade;
+      this.stalledCount = dto.stalledCount ?? 0;
+      this.lockToken = dto.lockToken;
       this.progress = dto.progress;
       this.processedOn = dto.processedAt;
       this.finishedOn = dto.finishedAt;
@@ -691,23 +695,59 @@ export class Worker<DataType = any, ResultType = any, NameType extends string = 
 
     this.emit('active', job);
 
+    const lockDuration = this.options.lockDuration || 30000;
+    const lockRenewInterval = this.options.lockRenewTime || Math.max(100, Math.floor(lockDuration / 3));
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let lockLost = false;
+
+    if (job.lockToken) {
+      heartbeatTimer = setInterval(async () => {
+        try {
+          const renewed = await this.queueBinding.renewLock(job.id, job.lockToken!, lockDuration);
+          if (!renewed) {
+            lockLost = true;
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            this.emit('error', new Error(`LOCK_LOST: Worker lost lock for job ${job.id}`));
+          }
+        } catch {
+          lockLost = true;
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+        }
+      }, lockRenewInterval);
+    }
+
     try {
       const result = await this.processor(job);
       job.returnvalue = result;
 
+      if (lockLost) {
+        throw new Error(`LOCK_LOST: Job ${job.id} was recovered by another worker while executing`);
+      }
+
       const resBuf = result !== undefined ? Buffer.from(JSON.stringify(result), 'utf-8') : null;
-      await this.queueBinding.complete(job.id, resBuf);
+      await this.queueBinding.complete(job.id, resBuf, job.lockToken || null);
 
       this.emit('completed', job, result);
     } catch (err: any) {
       const errMsg = err?.message || String(err);
       job.failedReason = errMsg;
 
-      const permanentlyFailed = await this.queueBinding.fail(job.id, errMsg);
-      if (permanentlyFailed) {
+      if (!lockLost) {
+        try {
+          const permanentlyFailed = await this.queueBinding.fail(job.id, errMsg, job.lockToken || null);
+          if (permanentlyFailed) {
+            this.emit('failed', job, err);
+          }
+        } catch (failErr) {
+          this.emit('failed', job, err);
+        }
+      } else {
         this.emit('failed', job, err);
       }
     } finally {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
       if (this.rateLimiter) {
         try {
           await this.rateLimiter.release(this.name);
@@ -756,37 +796,28 @@ export class FlowProducer {
     const parentQueue = new Queue<T>(flow.queueName, { connection: this.options.connection });
     await parentQueue.waitUntilReady();
 
+    const totalChildren = flow.children?.length || 0;
     const parentJob = await parentQueue.add(
       flow.name as any,
       flow.data as any,
       {
         ...flow.opts,
-        delay: flow.children && flow.children.length > 0 ? 86400000 : flow.opts?.delay,
+        delay: totalChildren > 0 ? 86400000 : flow.opts?.delay,
       }
     );
 
     const childNodes: FlowNode[] = [];
 
-    if (flow.children && flow.children.length > 0) {
-      let registeredCount = 0;
-      try {
-        for (const childFlow of flow.children) {
-          const childOpts: QueueJobOptions = {
-            ...childFlow.opts,
-            parent: { id: parentJob.id, queue: flow.queueName },
-          };
-          const childNode = await this.add({ ...childFlow, opts: childOpts });
-          childNodes.push(childNode);
-          registeredCount++;
-        }
-        parentQueue.binding.registerParentChildren(parentJob.id, registeredCount);
-      } catch (err) {
-        if (registeredCount > 0) {
-          parentQueue.binding.registerParentChildren(parentJob.id, registeredCount);
-        } else {
-          await parentQueue.binding.promote(parentJob.id);
-        }
-        throw err;
+    if (totalChildren > 0) {
+      await parentQueue.binding.registerParentChildren(parentJob.id, totalChildren);
+
+      for (const childFlow of flow.children!) {
+        const childOpts: QueueJobOptions = {
+          ...childFlow.opts,
+          parent: { id: parentJob.id, queue: flow.queueName },
+        };
+        const childNode = await this.add({ ...childFlow, opts: childOpts });
+        childNodes.push(childNode);
       }
     }
 

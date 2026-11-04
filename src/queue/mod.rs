@@ -47,10 +47,11 @@ impl QueueEngine {
         queue_name: &str,
         job_id: &str,
         return_value: Option<Vec<u8>>,
-    ) -> Result<(), TurboPulseError> {
+        lock_token: Option<&str>,
+    ) -> Result<bool, TurboPulseError> {
         match self {
-            QueueEngine::InMemory(q) => q.complete_job(queue_name, job_id, return_value),
-            QueueEngine::Redis(q) => q.complete_job(queue_name, job_id, return_value).await,
+            QueueEngine::InMemory(q) => q.complete_job(queue_name, job_id, return_value, lock_token),
+            QueueEngine::Redis(q) => q.complete_job(queue_name, job_id, return_value, lock_token).await,
         }
     }
 
@@ -59,10 +60,24 @@ impl QueueEngine {
         queue_name: &str,
         job_id: &str,
         error_msg: &str,
+        lock_token: Option<&str>,
     ) -> Result<bool, TurboPulseError> {
         match self {
-            QueueEngine::InMemory(q) => q.fail_job(queue_name, job_id, error_msg),
-            QueueEngine::Redis(q) => q.fail_job(queue_name, job_id, error_msg).await,
+            QueueEngine::InMemory(q) => q.fail_job(queue_name, job_id, error_msg, lock_token),
+            QueueEngine::Redis(q) => q.fail_job(queue_name, job_id, error_msg, lock_token).await,
+        }
+    }
+
+    pub async fn renew_lock(
+        &self,
+        queue_name: &str,
+        job_id: &str,
+        lock_token: &str,
+        lock_duration_ms: u32,
+    ) -> Result<bool, TurboPulseError> {
+        match self {
+            QueueEngine::InMemory(q) => q.renew_lock(queue_name, job_id, lock_token, lock_duration_ms),
+            QueueEngine::Redis(q) => q.renew_lock(queue_name, job_id, lock_token, lock_duration_ms).await,
         }
     }
 
@@ -150,9 +165,13 @@ impl QueueEngine {
         }
     }
 
-    pub fn register_parent_children(&self, parent_id: &str, count: u32) {
-        if let QueueEngine::InMemory(q) = self {
-            q.register_parent_children(parent_id, count);
+    pub async fn register_parent_children(&self, _queue_name: &str, parent_id: &str, count: u32) -> Result<(), TurboPulseError> {
+        match self {
+            QueueEngine::InMemory(q) => {
+                q.register_parent_children(parent_id, count);
+                Ok(())
+            }
+            QueueEngine::Redis(q) => q.register_parent_children(parent_id, count).await,
         }
     }
 }

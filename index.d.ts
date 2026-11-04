@@ -100,7 +100,8 @@ export const enum JobState {
   Delayed = 'Delayed',
   Active = 'Active',
   Completed = 'Completed',
-  Failed = 'Failed'
+  Failed = 'Failed',
+  WaitingChildren = 'WaitingChildren'
 }
 export interface JobCounts {
   waiting: number
@@ -124,6 +125,7 @@ export interface JobDto {
   finishedAt?: number
   failedReason?: string
   returnValue?: Buffer
+  lockToken?: string
 }
 export interface RateLimitResult {
   /** True if the request is permitted immediately; false if throttled */
@@ -188,12 +190,14 @@ export declare class NativeQueue {
   /** Fetches a batch of prioritized, available jobs */
   fetchBatch(count: number): Promise<Array<JobDto>>
   /** Marks job as completed and stores optional binary result. */
-  complete(jobId: string, returnValue?: Buffer | undefined | null): Promise<void>
+  complete(jobId: string, returnValue?: Buffer | undefined | null, lockToken?: string | undefined | null): Promise<boolean>
   /**
    * Fails job. If retries remain, automatically calculates backoff with jitter and re-schedules.
    * Returns true if permanently failed; false if retry scheduled.
    */
-  fail(jobId: string, errorMsg: string): Promise<boolean>
+  fail(jobId: string, errorMsg: string, lockToken?: string | undefined | null): Promise<boolean>
+  /** Renews active lock on an executing job (heartbeat). */
+  renewLock(jobId: string, lockToken: string, lockDurationMs?: number | undefined | null): Promise<boolean>
   /** Updates progress percentage (0 - 100) for a job. */
   updateProgress(jobId: string, progress: number): Promise<void>
   /** Retrieves job status and metadata by ID. */
@@ -215,7 +219,7 @@ export declare class NativeQueue {
   /** Updates arbitrary job binary payload */
   updateData(jobId: string, data: Buffer): Promise<void>
   /** Registers parent with children count for DAG FlowProducer */
-  registerParentChildren(parentId: string, count: number): void
+  registerParentChildren(parentId: string, count: number): Promise<void>
 }
 /** Core native engine holding shared state for In-Memory or Redis distributed backends. */
 export declare class NativeEngine {

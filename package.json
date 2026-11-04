@@ -1,6 +1,6 @@
 {
   "name": "turbopulse",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Production-grade, zero-copy distributed rate limiting and job queue engine for Node.js powered by Rust & napi-rs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -41,7 +41,8 @@
     "test:validation": "ts-node test/user_input_validation.test.ts",
     "test:audit": "ts-node test/gpt_audit_verification.test.ts",
     "test:cluster": "ts-node test/redis_cluster.test.ts",
-    "test:all": "npm test && npm run test:queue && npm run test:limiter-dropin && npm run test:queue-dropin && npm run test:validation && npm run test:audit && npm run test:cluster",
+    "test:distributed": "ts-node test/distributed_correctness.test.ts",
+    "test:all": "npm test && npm run test:queue && npm run test:limiter-dropin && npm run test:queue-dropin && npm run test:validation && npm run test:audit && npm run test:cluster && npm run test:distributed",
     "benchmark": "ts-node test/benchmark.ts",
     "benchmark:redis": "ts-node test/benchmark_redis.ts",
     "benchmark:1m": "ts-node test/benchmark_1million.ts",

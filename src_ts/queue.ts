@@ -69,6 +69,7 @@ export class Queue<TData = any, TResult = any> extends EventEmitter {
       data: buffer,
       state: (opts.delay ?? 0) > 0 ? ('Delayed' as any) : ('Waiting' as any),
       attemptsMade: 0,
+      stalledCount: 0,
       progress: 0,
       createdAt: Date.now(),
     };
