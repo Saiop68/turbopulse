@@ -126,11 +126,11 @@ bun add turbopulse
 
 TurboPulse bundles pre-compiled native binaries out of the box using Node-API (`napi-rs`):
 
-- **Linux:** `x86_64` (glibc), `aarch64` (ARM64 / AWS Graviton), `musl` (Alpine Linux Docker containers)
-- **macOS:** Apple Silicon (`aarch64-apple-darwin` M1/M2/M3/M4), Intel (`x86_64-apple-darwin`)
-- **Windows:** `x86_64` (`x86_64-pc-windows-msvc`)
+- **Linux:** `x86_64` (glibc Ubuntu, Debian, CentOS, Fedora, RHEL) — `turbopulse.linux-x64-gnu.node` bundled in npm
+- **macOS:** Apple Silicon (`aarch64-apple-darwin` M1, M2, M3, M4) — `turbopulse.darwin-arm64.node` bundled in npm
+- **Windows:** `x86_64` (`x86_64-pc-windows-msvc`) — `turbopulse.win32-x64-msvc.node` bundled in npm
 
-> **Zero Compilation Friction:** No local Rust toolchain, C++ compiler, `node-gyp`, or Python installation is required on your development machine or production deployment servers. The appropriate native binary is automatically selected and loaded at runtime.
+> **Zero Compilation Friction:** No local Rust toolchain, C++ compiler, `node-gyp`, or Python installation is required on your development machine or production deployment servers. The appropriate native binary is automatically selected and loaded at runtime. Additional targets (ARM64 Linux, Alpine musl) are built via source or CI release matrix.
 
 ---
 
@@ -580,6 +580,14 @@ events.on('progress', ({ jobId, data }) => {
 ---
 
 ## Benchmarks & Performance Specs
+
+> 📖 **Comprehensive Head-to-Head Report:**  
+> For complete, empirical benchmarks comparing **TurboPulse vs. BullMQ** and **TurboPulse vs. Bottleneck** (with exact latency percentiles, p50, p95, p99, and memory footprints), see [**`benchmark.md`**](benchmark.md).
+
+### The Zero-Infrastructure Advantage: TurboPulse vs. BullMQ
+- **BullMQ strictly requires an external database:** BullMQ cannot run standalone without an active Redis instance (or Postgres via BullMQ Pro). If Redis is unreachable, BullMQ fails immediately.
+- **TurboPulse runs with zero external dependencies:** TurboPulse includes an embedded native Rust engine (`createInMemoryTurboPulse()`). Priority queues, delayed jobs, retries with backoff & jitter, concurrency pools, stalled recovery, and DAG workflows (`FlowProducer`) execute out of the box with **zero Redis servers, zero Docker containers, and zero network roundtrips**.
+- **Distributed when you need it:** Simply supply `{ connection: { host: '127.0.0.1', port: 6379 } }` to activate multi-node Redis clustering.
 
 ### Test Environments & Hardware Specs
 
