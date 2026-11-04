@@ -25,6 +25,7 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
   private rateLimiter?: RateLimiter;
   private concurrency: number;
   private pollIntervalMs: number;
+  private options: WorkerOptions;
   private isRunning: boolean = false;
   private isPaused: boolean = false;
   private activeJobs: number = 0;
@@ -48,6 +49,7 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
     this.name = queueName;
     this.processor = processor;
     this.nativeQueue = nativeQueue;
+    this.options = options;
     this.concurrency = Math.max(1, options.concurrency ?? 1);
     this.pollIntervalMs = options.pollIntervalMs ?? 30;
 
@@ -145,7 +147,7 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
           }
         }
 
-        const dto = await this.nativeQueue.fetchNext();
+        const dto = await this.nativeQueue.fetchNext(this.options.lockDuration ?? 30000);
         if (!dto) {
           // Queue is empty or paused: back off briefly
           if (this.rateLimiter && this.nativeLimiter) {
@@ -164,25 +166,35 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
         // Job received! Execute processor
         this.activeJobs++;
         const job = new Job<TData, TResult>(dto, this.nativeQueue);
+        const abortController = new AbortController();
+        (job as any).signal = abortController.signal;
+        (job as any).abortSignal = abortController.signal;
         this.emit('active', job);
 
-        const lockDuration = 30000;
-        const lockRenewInterval = Math.max(100, Math.floor(lockDuration / 3));
+        const lockDuration = this.options.lockDuration ?? 30000;
+        const lockRenewInterval = this.options.lockRenewTime ?? Math.max(25, Math.floor(lockDuration / 3));
         let heartbeatTimer: NodeJS.Timeout | null = null;
         let lockLost = false;
+        let renewingLock = false;
 
         if (job.lockToken) {
           heartbeatTimer = setInterval(async () => {
+            if (renewingLock || lockLost) return;
+            renewingLock = true;
             try {
               const renewed = await this.nativeQueue.renewLock(job.id, job.lockToken!, lockDuration);
               if (!renewed) {
                 lockLost = true;
+                abortController.abort(new Error(`LOCK_LOST: Worker lost lock for job ${job.id}`));
                 if (heartbeatTimer) clearInterval(heartbeatTimer);
                 this.emit('error', new Error(`LOCK_LOST: Worker lost lock for job ${job.id}`));
               }
-            } catch {
+            } catch (err: any) {
               lockLost = true;
+              abortController.abort(err);
               if (heartbeatTimer) clearInterval(heartbeatTimer);
+            } finally {
+              renewingLock = false;
             }
           }, lockRenewInterval);
         }
@@ -192,14 +204,17 @@ export class Worker<TData = any, TResult = any> extends EventEmitter {
           if (lockLost) {
             throw new Error(`LOCK_LOST: Job ${job.id} was recovered by another worker while executing`);
           }
+          if (!job.lockToken) {
+            throw new Error(`LOCK_LOST: Missing lock token for job ${job.id}`);
+          }
           const returnBuf = Job.serializePayload(result);
-          await this.nativeQueue.complete(job.id, returnBuf, job.lockToken || null);
+          await this.nativeQueue.complete(job.id, returnBuf, job.lockToken);
           this.emit('completed', job, result);
         } catch (err: any) {
           const errorMsg = err?.message || String(err);
-          if (!lockLost) {
+          if (!lockLost && job.lockToken) {
             try {
-              const permanentlyFailed = await this.nativeQueue.fail(job.id, errorMsg, job.lockToken || null);
+              const permanentlyFailed = await this.nativeQueue.fail(job.id, errorMsg, job.lockToken);
               if (permanentlyFailed) {
                 this.emit('failed', job, err);
               } else {

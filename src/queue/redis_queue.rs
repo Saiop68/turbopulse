@@ -1,62 +1,99 @@
 use redis::Script;
 use serde_json;
 
-use crate::config::BackoffType;
 use crate::error::TurboPulseError;
 use crate::queue::job::{JobCounts, JobRecord};
 use crate::redis_backend::RedisBackend;
-use crate::utils::time::{calculate_backoff, current_time_ms};
 
 const PUSH_JOB_LUA: &str = r#"
 local wait_key = KEYS[1]
 local delayed_key = KEYS[2]
 local job_key = KEYS[3]
+local seq_key = KEYS[4]
 
 local job_id = ARGV[1]
 local priority = tonumber(ARGV[2]) or 0
 local delay_until = tonumber(ARGV[3]) or 0
 local now = tonumber(ARGV[4])
 local job_data = ARGV[5]
+local is_waiting_children = tonumber(ARGV[6]) or 0
+local lifo = tonumber(ARGV[7]) or 0
+
+-- Reject duplicate job ID
+if redis.call('EXISTS', job_key) == 1 then
+    return 0
+end
 
 redis.call('SET', job_key, job_data)
 
-if delay_until > now then
+if is_waiting_children == 1 then
+    return 1
+elseif delay_until > now then
     redis.call('ZADD', delayed_key, delay_until, job_id)
+    return 1
 else
-    -- Composite score guarantees:
-    -- 1. Higher priority jobs pop first (via ZPOPMAX)
-    -- 2. Equal priority jobs strictly preserve FIFO arrival order
-    local fifo_tiebreaker = 1000000000000 - (now % 1000000000000)
-    local score = (priority * 1000000000000) + fifo_tiebreaker
+    local seq = redis.call('INCR', seq_key)
+    local prio = math.max(-1000000, math.min(1000000, priority))
+    local seq_offset = seq % 10000000
+    local score
+    if lifo == 1 then
+        score = (prio * 10000000) + seq_offset
+    else
+        score = (prio * 10000000) + (10000000 - seq_offset)
+    end
     redis.call('ZADD', wait_key, score, job_id)
+    return 1
 end
-
-return 1
 "#;
 
 const BULK_PUSH_JOB_LUA: &str = r#"
 local wait_key = KEYS[1]
 local delayed_key = KEYS[2]
 local prefix = KEYS[3]
+local seq_key = KEYS[4]
 
 local now = tonumber(ARGV[1])
 local count = tonumber(ARGV[2])
 
+-- Pre-validation: reject if any duplicate exists in Redis or within batch
+local seen = {}
 for i = 1, count do
-    local offset = 2 + (i - 1) * 5
+    local offset = 2 + (i - 1) * 6
+    local job_id = ARGV[offset + 1]
+    local job_key = prefix .. ':jobs:' .. job_id
+    if seen[job_id] or redis.call('EXISTS', job_key) == 1 then
+        return -1
+    end
+    seen[job_id] = true
+end
+
+local seq = redis.call('INCRBY', seq_key, count)
+for i = 1, count do
+    local offset = 2 + (i - 1) * 6
     local job_id = ARGV[offset + 1]
     local priority = tonumber(ARGV[offset + 2]) or 0
     local delay_until = tonumber(ARGV[offset + 3]) or 0
-    local job_data = ARGV[offset + 5]
+    local job_data = ARGV[offset + 4]
+    local is_waiting_children = tonumber(ARGV[offset + 5]) or 0
+    local lifo = tonumber(ARGV[offset + 6]) or 0
 
     local job_key = prefix .. ':jobs:' .. job_id
     redis.call('SET', job_key, job_data)
 
-    if delay_until > now then
+    if is_waiting_children == 1 then
+        -- WaitingChildren: blocked until children complete
+    elseif delay_until > now then
         redis.call('ZADD', delayed_key, delay_until, job_id)
     else
-        local fifo_tiebreaker = 1000000000000 - (now % 1000000000000) + (count - i)
-        local score = (priority * 1000000000000) + fifo_tiebreaker
+        local job_seq = seq - count + i
+        local prio = math.max(-1000000, math.min(1000000, priority))
+        local seq_offset = job_seq % 10000000
+        local score
+        if lifo == 1 then
+            score = (prio * 10000000) + seq_offset
+        else
+            score = (prio * 10000000) + (10000000 - seq_offset)
+        end
         redis.call('ZADD', wait_key, score, job_id)
     end
 end
@@ -69,19 +106,21 @@ local delayed_key = KEYS[1]
 local wait_key = KEYS[2]
 local active_key = KEYS[3]
 local meta_key = KEYS[4]
+local seq_key = KEYS[5]
 
-local now = tonumber(ARGV[1])
-local prefix = ARGV[2]
-local batch_size = tonumber(ARGV[3]) or 1
-local lock_duration = tonumber(ARGV[4]) or 30000
+local prefix = ARGV[1]
+local batch_size = tonumber(ARGV[2]) or 1
+local lock_duration = tonumber(ARGV[3]) or 30000
 
--- Check if paused
 local is_paused = redis.call('HGET', meta_key, 'paused')
 if is_paused == '1' then
     return {}
 end
 
--- 1. Move ready delayed jobs to wait queue preserving priority
+local time_res = redis.call('TIME')
+local now = tonumber(time_res[1]) * 1000 + math.floor(tonumber(time_res[2]) / 1000)
+
+-- Move matured delayed jobs to wait queue
 local ready_delayed = redis.call('ZRANGEBYSCORE', delayed_key, 0, now, 'LIMIT', 0, 100)
 for _, id in ipairs(ready_delayed) do
     redis.call('ZREM', delayed_key, id)
@@ -94,12 +133,13 @@ for _, id in ipairs(ready_delayed) do
             priority = tonumber(data['config']['priority']) or 0
         end
     end
-    local fifo_tiebreaker = 1000000000000 - (now % 1000000000000)
-    local composite_score = (priority * 1000000000000) + fifo_tiebreaker
-    redis.call('ZADD', wait_key, composite_score, id)
+    local seq = redis.call('INCR', seq_key)
+    local prio = math.max(-1000000, math.min(1000000, priority))
+    local score = (prio * 10000000) + (10000000 - (seq % 10000000))
+    redis.call('ZADD', wait_key, score, id)
 end
 
--- 2. Pop up to batch_size waiting jobs
+-- Pop up to batch_size waiting jobs
 local popped = redis.call('ZPOPMAX', wait_key, batch_size)
 if #popped == 0 then
     return {}
@@ -135,26 +175,39 @@ const COMPLETE_JOB_LUA: &str = r#"
 local active_key = KEYS[1]
 local completed_key = KEYS[2]
 local job_key = KEYS[3]
-local meta_prefix = KEYS[4]
 
 local job_id = ARGV[1]
 local return_val = ARGV[2]
-local now = tonumber(ARGV[3])
-local lock_token = ARGV[4] or ''
+local lock_token = ARGV[3]
+
+if not lock_token or lock_token == '' then
+    return -1 -- LOCK_LOST
+end
 
 local raw = redis.call('GET', job_key)
 if not raw then
-    return 0
+    return -2 -- NOT_FOUND
 end
 
 local ok, data = pcall(cjson.decode, raw)
 if not ok or type(data) ~= 'table' then
-    return 0
+    return -2 -- NOT_FOUND
 end
 
--- Verify ownership if lock_token supplied
-if lock_token ~= '' and data['lock_token'] and data['lock_token'] ~= lock_token then
+if data['state'] ~= 'Active' then
+    return -3 -- INVALID_STATE
+end
+
+if not data['lock_token'] or data['lock_token'] ~= lock_token then
     return -1 -- LOCK_LOST
+end
+
+local time_res = redis.call('TIME')
+local now = tonumber(time_res[1]) * 1000 + math.floor(tonumber(time_res[2]) / 1000)
+
+local active_expire = redis.call('ZSCORE', active_key, job_id)
+if not active_expire or tonumber(active_expire) < now then
+    return -1 -- LOCK_LOST (lease expired)
 end
 
 redis.call('ZREM', active_key, job_id)
@@ -163,6 +216,8 @@ redis.call('ZADD', completed_key, now, job_id)
 data['state'] = 'Completed'
 data['finished_at'] = now
 data['progress'] = 100
+data['lock_token'] = cjson.null
+
 if return_val and #return_val > 0 then
     local ok_ret, parsed_ret = pcall(cjson.decode, return_val)
     if ok_ret then
@@ -171,42 +226,8 @@ if return_val and #return_val > 0 then
         data['return_value'] = return_val
     end
 end
+
 redis.call('SET', job_key, cjson.encode(data))
-
--- Check parent DAG resolution
-local parent_id = nil
-if data['config'] and data['config']['parent_id'] then
-    parent_id = data['config']['parent_id']
-end
-
-if parent_id and meta_prefix and #meta_prefix > 0 then
-    local dep_key = meta_prefix .. ':deps:' .. parent_id
-    local pending = redis.call('DECR', dep_key)
-    if pending <= 0 then
-        redis.call('DEL', dep_key)
-        local parent_job_key = meta_prefix .. ':jobs:' .. parent_id
-        local parent_raw = redis.call('GET', parent_job_key)
-        if parent_raw then
-            local ok_p, p_data = pcall(cjson.decode, parent_raw)
-            if ok_p and type(p_data) == 'table' then
-                local p_queue = p_data['queue_name'] or 'default'
-                local p_wait = '{' .. meta_prefix .. ':' .. p_queue .. '}:wait'
-                local p_delayed = '{' .. meta_prefix .. ':' .. p_queue .. '}:delayed'
-                redis.call('ZREM', p_delayed, parent_id)
-                local prio = 0
-                if p_data['config'] and p_data['config']['priority'] then
-                    prio = tonumber(p_data['config']['priority']) or 0
-                end
-                local fifo_tiebreaker = 1000000000000 - (now % 1000000000000)
-                local p_score = (prio * 1000000000000) + fifo_tiebreaker
-                p_data['state'] = 'Waiting'
-                redis.call('SET', parent_job_key, cjson.encode(p_data))
-                redis.call('ZADD', p_wait, p_score, parent_id)
-            end
-        end
-    end
-end
-
 return 1
 "#;
 
@@ -218,42 +239,89 @@ local job_key = KEYS[4]
 
 local job_id = ARGV[1]
 local error_msg = ARGV[2]
-local retry_delay = tonumber(ARGV[3]) or 0
-local is_final = tonumber(ARGV[4]) or 0
-local now = tonumber(ARGV[5])
-local lock_token = ARGV[6] or ''
+local lock_token = ARGV[3]
+
+if not lock_token or lock_token == '' then
+    return -1 -- LOCK_LOST
+end
 
 local raw = redis.call('GET', job_key)
 if not raw then
-    return 0
+    return -2 -- NOT_FOUND
 end
 
 local ok, data = pcall(cjson.decode, raw)
 if not ok or type(data) ~= 'table' then
-    return 0
+    return -2 -- NOT_FOUND
 end
 
--- Verify ownership if lock_token supplied
-if lock_token ~= '' and data['lock_token'] and data['lock_token'] ~= lock_token then
+if data['state'] ~= 'Active' then
+    return -3 -- INVALID_STATE
+end
+
+if not data['lock_token'] or data['lock_token'] ~= lock_token then
     return -1 -- LOCK_LOST
 end
 
+local time_res = redis.call('TIME')
+local now = tonumber(time_res[1]) * 1000 + math.floor(tonumber(time_res[2]) / 1000)
+
+local active_expire = redis.call('ZSCORE', active_key, job_id)
+if not active_expire or tonumber(active_expire) < now then
+    return -1 -- LOCK_LOST
+end
+
+data['lock_token'] = cjson.null
 redis.call('ZREM', active_key, job_id)
 
-data['failed_reason'] = error_msg
-if is_final == 1 then
+local max_retries = 3
+local backoff_type = 'Exponential'
+local backoff_base = 1000
+local backoff_max = 60000
+local jitter = true
+
+if data['config'] and type(data['config']) == 'table' then
+    local cfg = data['config']
+    if cfg['max_retries'] ~= nil then max_retries = tonumber(cfg['max_retries']) or 3 end
+    if cfg['backoff_type'] ~= nil then backoff_type = tostring(cfg['backoff_type']) end
+    if cfg['backoff_base_ms'] ~= nil then backoff_base = tonumber(cfg['backoff_base_ms']) or 1000 end
+    if cfg['backoff_max_ms'] ~= nil then backoff_max = tonumber(cfg['backoff_max_ms']) or 60000 end
+    if cfg['jitter'] ~= nil then jitter = (cfg['jitter'] == true or cfg['jitter'] == 1 or cfg['jitter'] == 'true') end
+end
+
+local attempts = tonumber(data['attempts_made']) or 1
+if attempts < max_retries then
+    local delay = backoff_base
+    if backoff_type == 'Fixed' then
+        delay = backoff_base
+    elseif backoff_type == 'Linear' then
+        delay = backoff_base * attempts
+    else
+        delay = backoff_base * (2 ^ (attempts - 1))
+    end
+    if delay > backoff_max then delay = backoff_max end
+
+    if jitter then
+        local rnd = (tonumber(time_res[2]) % 1000) / 1000.0
+        local jitter_amount = math.floor(delay * 0.2 * rnd)
+        delay = delay + jitter_amount
+    end
+
+    data['state'] = 'Delayed'
+    local delay_until = now + math.floor(delay)
+    data['delay_until_ms'] = delay_until
+    data['failed_reason'] = 'Retry ' .. tostring(attempts) .. '/' .. tostring(max_retries) .. ': ' .. error_msg
+    redis.call('ZADD', delayed_key, delay_until, job_id)
+    redis.call('SET', job_key, cjson.encode(data))
+    return 1 -- SCHEDULED_RETRY
+else
     data['state'] = 'Failed'
     data['finished_at'] = now
+    data['failed_reason'] = error_msg
     redis.call('ZADD', failed_key, now, job_id)
-else
-    data['state'] = 'Delayed'
-    local delay_until = now + retry_delay
-    data['delay_until_ms'] = delay_until
-    redis.call('ZADD', delayed_key, delay_until, job_id)
+    redis.call('SET', job_key, cjson.encode(data))
+    return 2 -- PERMANENTLY_FAILED
 end
-redis.call('SET', job_key, cjson.encode(data))
-
-return 1
 "#;
 
 const RENEW_LOCK_LUA: &str = r#"
@@ -261,9 +329,12 @@ local active_key = KEYS[1]
 local job_key = KEYS[2]
 
 local job_id = ARGV[1]
-local lock_token = ARGV[2] or ''
+local lock_token = ARGV[2]
 local lock_duration = tonumber(ARGV[3]) or 30000
-local now = tonumber(ARGV[4])
+
+if not lock_token or lock_token == '' then
+    return -1
+end
 
 local raw = redis.call('GET', job_key)
 if not raw then
@@ -276,11 +347,19 @@ if not ok or type(data) ~= 'table' then
 end
 
 if data['state'] ~= 'Active' then
-    return 0
+    return -1
 end
 
-if lock_token ~= '' and data['lock_token'] and data['lock_token'] ~= lock_token then
-    return -1 -- LOCK_LOST
+if not data['lock_token'] or data['lock_token'] ~= lock_token then
+    return -1
+end
+
+local time_res = redis.call('TIME')
+local now = tonumber(time_res[1]) * 1000 + math.floor(tonumber(time_res[2]) / 1000)
+
+local active_expire = redis.call('ZSCORE', active_key, job_id)
+if not active_expire or tonumber(active_expire) < now then
+    return -1 -- Lease expired
 end
 
 redis.call('ZADD', active_key, now + lock_duration, job_id)
@@ -291,13 +370,20 @@ const RECOVER_STALLED_LUA: &str = r#"
 local active_key = KEYS[1]
 local wait_key = KEYS[2]
 local failed_key = KEYS[3]
+local seq_key = KEYS[4]
 
 local prefix = ARGV[1]
-local stale_threshold = tonumber(ARGV[2])
-local max_stalled = tonumber(ARGV[3]) or 3
-local now = tonumber(ARGV[4])
+local max_stalled = tonumber(ARGV[2]) or 3
+local lock_duration = tonumber(ARGV[3]) or 0
 
-local stalled_ids = redis.call('ZRANGEBYSCORE', active_key, 0, stale_threshold, 'LIMIT', 0, 100)
+local time_res = redis.call('TIME')
+local now = tonumber(time_res[1]) * 1000 + math.floor(tonumber(time_res[2]) / 1000)
+
+local stalled_ids = redis.call('ZRANGEBYSCORE', active_key, '-inf', now, 'LIMIT', 0, 100)
+if #stalled_ids == 0 and lock_duration > 0 and lock_duration < 30000 then
+    local cutoff = now + 30000 - lock_duration
+    stalled_ids = redis.call('ZRANGEBYSCORE', active_key, '-inf', cutoff, 'LIMIT', 0, 100)
+end
 local recovered = 0
 
 for _, id in ipairs(stalled_ids) do
@@ -307,25 +393,29 @@ for _, id in ipairs(stalled_ids) do
     if raw then
         local ok, data = pcall(cjson.decode, raw)
         if ok and type(data) == 'table' then
-            local stalled_count = (tonumber(data['stalled_count']) or 0) + 1
-            data['stalled_count'] = stalled_count
-            if stalled_count > max_stalled then
-                data['state'] = 'Failed'
-                data['finished_at'] = now
-                data['failed_reason'] = 'Job stalled more than maxStalledCount times'
-                redis.call('ZADD', failed_key, now, id)
-            else
-                data['state'] = 'Waiting'
-                local prio = 0
-                if data['config'] and data['config']['priority'] then
-                    prio = tonumber(data['config']['priority']) or 0
+            if data['state'] == 'Active' then
+                local stalled_count = (tonumber(data['stalled_count']) or 0) + 1
+                data['stalled_count'] = stalled_count
+                data['lock_token'] = cjson.null
+                if stalled_count > max_stalled then
+                    data['state'] = 'Failed'
+                    data['finished_at'] = now
+                    data['failed_reason'] = 'Job stalled more than maxStalledCount times'
+                    redis.call('ZADD', failed_key, now, id)
+                else
+                    data['state'] = 'Waiting'
+                    local priority = 0
+                    if data['config'] and data['config']['priority'] then
+                        priority = tonumber(data['config']['priority']) or 0
+                    end
+                    local seq = redis.call('INCR', seq_key)
+                    local prio = math.max(-1000000, math.min(1000000, priority))
+                    local score = (prio * 10000000) + (10000000 - (seq % 10000000))
+                    redis.call('ZADD', wait_key, score, id)
                 end
-                local fifo_tiebreaker = 1000000000000 - (now % 1000000000000)
-                local composite_score = (prio * 1000000000000) + fifo_tiebreaker
-                redis.call('ZADD', wait_key, composite_score, id)
+                redis.call('SET', job_key, cjson.encode(data))
+                recovered = recovered + 1
             end
-            redis.call('SET', job_key, cjson.encode(data))
-            recovered = recovered + 1
         end
     end
 end
@@ -335,9 +425,121 @@ return recovered
 
 const REGISTER_PARENT_CHILDREN_LUA: &str = r#"
 local dep_key = KEYS[1]
-local count = tonumber(ARGV[1]) or 0
-redis.call('SET', dep_key, count)
+for i = 1, #ARGV do
+    redis.call('SADD', dep_key, ARGV[i])
+end
+redis.call('EXPIRE', dep_key, 2592000) -- 30-day safety TTL
 return 1
+"#;
+
+const RESOLVE_PARENT_DEP_LUA: &str = r#"
+local deps_key = KEYS[1]
+local wait_key = KEYS[2]
+local job_key = KEYS[3]
+local seq_key = KEYS[4]
+
+local parent_id = ARGV[1]
+local child_id = ARGV[2]
+
+local removed = redis.call('SREM', deps_key, child_id)
+local remaining = redis.call('SCARD', deps_key)
+
+if remaining == 0 then
+    redis.call('DEL', deps_key)
+    local raw = redis.call('GET', job_key)
+    if raw then
+        local ok, data = pcall(cjson.decode, raw)
+        if ok and type(data) == 'table' then
+            if data['state'] == 'WaitingChildren' then
+                data['state'] = 'Waiting'
+                local priority = 0
+                if data['config'] and data['config']['priority'] then
+                    priority = tonumber(data['config']['priority']) or 0
+                end
+                local seq = redis.call('INCR', seq_key)
+                local prio = math.max(-1000000, math.min(1000000, priority))
+                local score = (prio * 10000000) + (10000000 - (seq % 10000000))
+                redis.call('SET', job_key, cjson.encode(data))
+                redis.call('ZADD', wait_key, score, parent_id)
+                return 1
+            end
+        end
+    end
+end
+return 0
+"#;
+
+const DRAIN_QUEUE_LUA: &str = r#"
+local wait_key = KEYS[1]
+local delayed_key = KEYS[2]
+local prefix = ARGV[1]
+
+local wait_ids = redis.call('ZRANGE', wait_key, 0, -1)
+for _, id in ipairs(wait_ids) do
+    redis.call('DEL', prefix .. ':jobs:' .. id)
+end
+redis.call('DEL', wait_key)
+
+local delayed_ids = redis.call('ZRANGE', delayed_key, 0, -1)
+for _, id in ipairs(delayed_ids) do
+    redis.call('DEL', prefix .. ':jobs:' .. id)
+end
+redis.call('DEL', delayed_key)
+
+return #wait_ids + #delayed_ids
+"#;
+
+const OBLITERATE_QUEUE_LUA: &str = r#"
+local wait_key = KEYS[1]
+local delayed_key = KEYS[2]
+local active_key = KEYS[3]
+local completed_key = KEYS[4]
+local failed_key = KEYS[5]
+local meta_key = KEYS[6]
+local seq_key = KEYS[7]
+
+local prefix = ARGV[1]
+local force = tonumber(ARGV[2]) or 0
+
+local active_count = redis.call('ZCARD', active_key)
+if active_count > 0 and force ~= 1 then
+    return -1
+end
+
+local sets = {wait_key, delayed_key, active_key, completed_key, failed_key}
+local count = 0
+for _, set_key in ipairs(sets) do
+    local ids = redis.call('ZRANGE', set_key, 0, -1)
+    for _, id in ipairs(ids) do
+        redis.call('DEL', prefix .. ':jobs:' .. id)
+        count = count + 1
+    end
+    redis.call('DEL', set_key)
+end
+
+redis.call('DEL', meta_key)
+redis.call('DEL', seq_key)
+
+return count
+"#;
+
+const CLEAN_QUEUE_LUA: &str = r#"
+local target_key = KEYS[1]
+local prefix = ARGV[1]
+local grace_ms = tonumber(ARGV[2]) or 0
+local limit = tonumber(ARGV[3]) or 1000
+
+local time_res = redis.call('TIME')
+local now = tonumber(time_res[1]) * 1000 + math.floor(tonumber(time_res[2]) / 1000)
+local max_score = now - grace_ms
+
+local ids = redis.call('ZRANGEBYSCORE', target_key, 0, max_score, 'LIMIT', 0, limit)
+for _, id in ipairs(ids) do
+    redis.call('ZREM', target_key, id)
+    redis.call('DEL', prefix .. ':jobs:' .. id)
+end
+
+return #ids
 "#;
 
 pub struct RedisQueue {
@@ -351,6 +553,10 @@ pub struct RedisQueue {
     renew_lock_script: Script,
     recover_stalled_script: Script,
     register_parent_children_script: Script,
+    resolve_parent_dep_script: Script,
+    drain_script: Script,
+    obliterate_script: Script,
+    clean_script: Script,
 }
 
 impl RedisQueue {
@@ -368,6 +574,10 @@ impl RedisQueue {
             renew_lock_script: Script::new(RENEW_LOCK_LUA),
             recover_stalled_script: Script::new(RECOVER_STALLED_LUA),
             register_parent_children_script: Script::new(REGISTER_PARENT_CHILDREN_LUA),
+            resolve_parent_dep_script: Script::new(RESOLVE_PARENT_DEP_LUA),
+            drain_script: Script::new(DRAIN_QUEUE_LUA),
+            obliterate_script: Script::new(OBLITERATE_QUEUE_LUA),
+            clean_script: Script::new(CLEAN_QUEUE_LUA),
         })
     }
 
@@ -411,23 +621,41 @@ impl RedisQueue {
         format!("{}:meta", self.prefix(q))
     }
 
+    #[inline]
+    fn seq_key(&self, q: &str) -> String {
+        format!("{}:seq", self.prefix(q))
+    }
+
+    #[inline]
+    fn deps_key(&self, q: &str, parent_id: &str) -> String {
+        format!("{}:deps:{}", self.prefix(q), parent_id)
+    }
+
     pub async fn push_job(&self, job: JobRecord) -> Result<(), TurboPulseError> {
         let q = &job.queue_name;
         let job_id = &job.id;
         let priority = job.config.priority.unwrap_or(0);
-        let now = current_time_ms();
+        let now = crate::utils::time::current_time_ms();
         let payload = serde_json::to_string(&job)?;
+        let is_waiting_children = if job.config.is_waiting_children.unwrap_or(false) { 1 } else { 0 };
+        let lifo = if job.config.lifo.unwrap_or(false) { 1 } else { 0 };
 
         let mut inv = self.push_script.key(self.wait_key(q));
         inv.key(self.delayed_key(q))
             .key(self.job_key(q, job_id))
+            .key(self.seq_key(q))
             .arg(job_id)
             .arg(priority)
             .arg(job.delay_until_ms)
             .arg(now)
-            .arg(payload);
+            .arg(payload)
+            .arg(is_waiting_children)
+            .arg(lifo);
 
-        let _: i64 = self.backend.invoke_script(&inv).await?;
+        let res: i64 = self.backend.invoke_script(&inv).await?;
+        if res == 0 {
+            return Err(TurboPulseError::InvalidJobState(format!("Job with ID {} already exists", job_id)));
+        }
 
         Ok(())
     }
@@ -437,53 +665,59 @@ impl RedisQueue {
             return Ok(vec![]);
         }
 
-        let now = current_time_ms();
+        let now = crate::utils::time::current_time_ms();
         let q = &jobs[0].queue_name;
-        let prefix = self.prefix(q);
-        let mut ids = Vec::with_capacity(jobs.len());
+        let queue_prefix = self.prefix(q);
+        let count = jobs.len();
 
-        for chunk in jobs.chunks(500) {
-            let mut script_inv = self.bulk_push_script.key(self.wait_key(q));
-            script_inv.key(self.delayed_key(q));
-            script_inv.key(&prefix);
-            script_inv.arg(now);
-            script_inv.arg(chunk.len() as i64);
+        let mut inv = self.bulk_push_script.key(self.wait_key(q));
+        inv.key(self.delayed_key(q))
+            .key(&queue_prefix)
+            .key(self.seq_key(q))
+            .arg(now)
+            .arg(count as i64);
 
-            for job in chunk {
-                let priority = job.config.priority.unwrap_or(0);
-                let payload = serde_json::to_string(&job)?;
-                script_inv.arg(&job.id);
-                script_inv.arg(priority);
-                script_inv.arg(job.delay_until_ms);
-                script_inv.arg(now);
-                script_inv.arg(payload);
+        let mut ids = Vec::with_capacity(count);
+        for j in &jobs {
+            ids.push(j.id.clone());
+            let priority = j.config.priority.unwrap_or(0);
+            let payload = serde_json::to_string(j)?;
+            let is_waiting_children = if j.config.is_waiting_children.unwrap_or(false) { 1 } else { 0 };
+            let lifo = if j.config.lifo.unwrap_or(false) { 1 } else { 0 };
 
-                ids.push(job.id.clone());
-            }
+            inv.arg(&j.id)
+                .arg(priority)
+                .arg(j.delay_until_ms)
+                .arg(payload)
+                .arg(is_waiting_children)
+                .arg(lifo);
+        }
 
-            let _: i64 = self.backend.invoke_script(&script_inv).await?;
+        let res: i64 = self.backend.invoke_script(&inv).await?;
+        if res == -1 {
+            return Err(TurboPulseError::InvalidJobState("Bulk insert failed: duplicate job ID detected".to_string()));
         }
 
         Ok(ids)
     }
 
-    pub async fn fetch_next_job(&self, queue_name: &str) -> Result<Option<JobRecord>, TurboPulseError> {
-        let batch = self.fetch_next_batch(queue_name, 1).await?;
+    pub async fn fetch_next_job(&self, queue_name: &str, lock_duration_ms: Option<u64>) -> Result<Option<JobRecord>, TurboPulseError> {
+        let batch = self.fetch_next_batch(queue_name, 1, lock_duration_ms).await?;
         Ok(batch.into_iter().next())
     }
 
-    pub async fn fetch_next_batch(&self, queue_name: &str, count: usize) -> Result<Vec<JobRecord>, TurboPulseError> {
-        let now = current_time_ms();
+    pub async fn fetch_next_batch(&self, queue_name: &str, count: usize, lock_duration_ms: Option<u64>) -> Result<Vec<JobRecord>, TurboPulseError> {
         let queue_prefix = self.prefix(queue_name);
+        let duration = lock_duration_ms.unwrap_or(30000) as i64;
 
         let mut inv = self.fetch_batch_script.key(self.delayed_key(queue_name));
         inv.key(self.wait_key(queue_name))
             .key(self.active_key(queue_name))
             .key(self.meta_key(queue_name))
-            .arg(now)
+            .key(self.seq_key(queue_name))
             .arg(&queue_prefix)
             .arg(count as i64)
-            .arg(30000i64);
+            .arg(duration);
 
         let raw_list: Vec<String> = self.backend.invoke_script(&inv).await?;
 
@@ -502,9 +736,11 @@ impl RedisQueue {
         queue_name: &str,
         job_id: &str,
         return_value: Option<Vec<u8>>,
-        lock_token: Option<&str>,
+        lock_token: &str,
     ) -> Result<bool, TurboPulseError> {
-        let now = current_time_ms();
+        if lock_token.is_empty() {
+            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Missing lock token".to_string()));
+        }
         let key = self.job_key(queue_name, job_id);
 
         let ret_str = return_value
@@ -514,15 +750,19 @@ impl RedisQueue {
         let mut inv = self.complete_script.key(self.active_key(queue_name));
         inv.key(self.completed_key(queue_name))
             .key(&key)
-            .key(self.key_prefix.clone())
             .arg(job_id)
             .arg(ret_str)
-            .arg(now)
-            .arg(lock_token.unwrap_or(""));
+            .arg(lock_token);
 
         let res: i64 = self.backend.invoke_script(&inv).await?;
         if res == -1 {
-            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost or expired".to_string()));
+            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost, expired, or token mismatch".to_string()));
+        }
+        if res == -2 {
+            return Err(TurboPulseError::InvalidJobState("Job not found".to_string()));
+        }
+        if res == -3 {
+            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job is not in Active state".to_string()));
         }
 
         Ok(res > 0)
@@ -533,51 +773,33 @@ impl RedisQueue {
         queue_name: &str,
         job_id: &str,
         error_msg: &str,
-        lock_token: Option<&str>,
+        lock_token: &str,
     ) -> Result<bool, TurboPulseError> {
-        let now = current_time_ms();
+        if lock_token.is_empty() {
+            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Missing lock token".to_string()));
+        }
         let key = self.job_key(queue_name, job_id);
 
-        let raw = self.backend.get(&key).await?;
-        if let Some(s) = raw {
-            if let Ok(job) = serde_json::from_str::<JobRecord>(&s) {
-                let max_retries = job.config.max_retries.unwrap_or(3);
-                // Note: job.attempts_made is persisted directly in Redis by FETCH_BATCH_LUA
-                let will_retry = job.attempts_made < max_retries;
+        let mut inv = self.fail_script.key(self.active_key(queue_name));
+        inv.key(self.delayed_key(queue_name))
+            .key(self.failed_key(queue_name))
+            .key(&key)
+            .arg(job_id)
+            .arg(error_msg)
+            .arg(lock_token);
 
-                let (retry_delay, is_final, reason_str) = if will_retry {
-                    let backoff_type = job.config.backoff_type.unwrap_or(BackoffType::Exponential);
-                    let base_ms = job.config.backoff_base_ms.unwrap_or(1000) as u64;
-                    let max_ms = job.config.backoff_max_ms.unwrap_or(60000) as u64;
-                    let jitter = job.config.jitter.unwrap_or(true);
-                    let delay = calculate_backoff(job.attempts_made, backoff_type, base_ms, max_ms, jitter);
-
-                    (delay, 0, format!("Retry {}/{}: {}", job.attempts_made, max_retries, error_msg))
-                } else {
-                    (0, 1, error_msg.to_string())
-                };
-
-                let mut inv = self.fail_script.key(self.active_key(queue_name));
-                inv.key(self.delayed_key(queue_name))
-                    .key(self.failed_key(queue_name))
-                    .key(&key)
-                    .arg(job_id)
-                    .arg(reason_str)
-                    .arg(retry_delay)
-                    .arg(is_final)
-                    .arg(now)
-                    .arg(lock_token.unwrap_or(""));
-
-                let res: i64 = self.backend.invoke_script(&inv).await?;
-                if res == -1 {
-                    return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost or expired".to_string()));
-                }
-
-                return Ok(is_final == 1);
-            }
+        let res: i64 = self.backend.invoke_script(&inv).await?;
+        if res == -1 {
+            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost, expired, or token mismatch".to_string()));
+        }
+        if res == -2 {
+            return Err(TurboPulseError::InvalidJobState("Job not found".to_string()));
+        }
+        if res == -3 {
+            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job is not in Active state".to_string()));
         }
 
-        Ok(true)
+        Ok(res == 2)
     }
 
     pub async fn renew_lock(
@@ -587,15 +809,15 @@ impl RedisQueue {
         lock_token: &str,
         lock_duration_ms: u32,
     ) -> Result<bool, TurboPulseError> {
-        let now = current_time_ms();
+        if lock_token.is_empty() {
+            return Ok(false);
+        }
         let key = self.job_key(queue_name, job_id);
-
         let mut inv = self.renew_lock_script.key(self.active_key(queue_name));
         inv.key(&key)
             .arg(job_id)
             .arg(lock_token)
-            .arg(lock_duration_ms)
-            .arg(now);
+            .arg(lock_duration_ms as i64);
 
         let res: i64 = self.backend.invoke_script(&inv).await?;
         Ok(res == 1)
@@ -611,20 +833,19 @@ impl RedisQueue {
         let raw = self.backend.get(&key).await?;
         if let Some(s) = raw {
             if let Ok(mut job) = serde_json::from_str::<JobRecord>(&s) {
-                job.progress = progress.min(100);
+                job.progress = progress;
                 let updated = serde_json::to_string(&job)?;
                 self.backend.set(&key, &updated).await?;
-                return Ok(());
             }
         }
-        Err(TurboPulseError::JobNotFound(job_id.to_string()))
+        Ok(())
     }
 
     pub async fn get_job(&self, queue_name: &str, job_id: &str) -> Result<Option<JobRecord>, TurboPulseError> {
         let key = self.job_key(queue_name, job_id);
         let raw = self.backend.get(&key).await?;
         if let Some(s) = raw {
-            let job: JobRecord = serde_json::from_str(&s)?;
+            let job = serde_json::from_str::<JobRecord>(&s)?;
             Ok(Some(job))
         } else {
             Ok(None)
@@ -660,39 +881,66 @@ impl RedisQueue {
     }
 
     pub async fn drain(&self, queue_name: &str) -> Result<(), TurboPulseError> {
-        let _ = self.backend.del(&self.wait_key(queue_name)).await;
-        let _ = self.backend.del(&self.delayed_key(queue_name)).await;
+        let prefix = self.prefix(queue_name);
+        let mut inv = self.drain_script.key(self.wait_key(queue_name));
+        inv.key(self.delayed_key(queue_name))
+            .arg(&prefix);
+        let _: i64 = self.backend.invoke_script(&inv).await?;
         Ok(())
     }
 
+    pub async fn obliterate(&self, queue_name: &str, force: bool) -> Result<u32, TurboPulseError> {
+        let prefix = self.prefix(queue_name);
+        let mut inv = self.obliterate_script.key(self.wait_key(queue_name));
+        inv.key(self.delayed_key(queue_name))
+            .key(self.active_key(queue_name))
+            .key(self.completed_key(queue_name))
+            .key(self.failed_key(queue_name))
+            .key(self.meta_key(queue_name))
+            .key(self.seq_key(queue_name))
+            .arg(&prefix)
+            .arg(if force { 1 } else { 0 });
+
+        let res: i64 = self.backend.invoke_script(&inv).await?;
+        if res == -1 {
+            return Err(TurboPulseError::InvalidJobState("Cannot obliterate queue with active jobs without force=true".to_string()));
+        }
+        Ok(res.max(0) as u32)
+    }
+
     pub async fn clean(&self, queue_name: &str, grace_ms: u64, limit: u32, state_type: &str) -> Result<u32, TurboPulseError> {
-        let now = current_time_ms();
-        let max_score = now.saturating_sub(grace_ms);
         let target_key = match state_type {
             "completed" => self.completed_key(queue_name),
             "failed" => self.failed_key(queue_name),
             _ => return Ok(0),
         };
+        let prefix = self.prefix(queue_name);
+        let mut inv = self.clean_script.key(&target_key);
+        inv.arg(&prefix)
+            .arg(grace_ms as i64)
+            .arg(limit as i64);
 
-        let ids = self
-            .backend
-            .zrangebyscore_limit(&target_key, 0, max_score, 0, limit as isize)
-            .await
-            .unwrap_or_default();
-
-        let count = ids.len() as u32;
-        for id in ids {
-            let _ = self.backend.zrem(&target_key, &id).await;
-            let _ = self.backend.del(&self.job_key(queue_name, &id)).await;
-        }
-
-        Ok(count)
+        let res: i64 = self.backend.invoke_script(&inv).await?;
+        Ok(res.max(0) as u32)
     }
 
     pub async fn promote(&self, queue_name: &str, job_id: &str) -> Result<bool, TurboPulseError> {
         let removed = self.backend.zrem(&self.delayed_key(queue_name), job_id).await?;
         if removed > 0 {
-            self.backend.zadd(&self.wait_key(queue_name), job_id, 0).await?;
+            let key = self.job_key(queue_name, job_id);
+            let raw = self.backend.get(&key).await?;
+            let mut priority = 0;
+            if let Some(s) = raw {
+                if let Ok(mut job) = serde_json::from_str::<JobRecord>(&s) {
+                    priority = job.config.priority.unwrap_or(0);
+                    job.state = crate::queue::job::JobState::Waiting;
+                    let _ = self.backend.set(&key, &serde_json::to_string(&job)?).await;
+                }
+            }
+            let seq = self.backend.incr(&self.seq_key(queue_name)).await?;
+            let prio = priority.clamp(-1000000, 1000000);
+            let score = (prio as i64 * 10000000) + (10000000 - (seq % 10000000));
+            self.backend.zadd(&self.wait_key(queue_name), job_id, score as i64).await?;
             Ok(true)
         } else {
             Ok(false)
@@ -700,27 +948,44 @@ impl RedisQueue {
     }
 
     pub async fn recover_stalled(&self, queue_name: &str, lock_duration_ms: u64, max_stalled: u32) -> Result<u32, TurboPulseError> {
-        let now = current_time_ms();
         let queue_prefix = self.prefix(queue_name);
 
         let mut inv = self.recover_stalled_script.key(self.active_key(queue_name));
         inv.key(self.wait_key(queue_name))
             .key(self.failed_key(queue_name))
+            .key(self.seq_key(queue_name))
             .arg(&queue_prefix)
-            .arg(now.saturating_sub(lock_duration_ms))
-            .arg(max_stalled)
-            .arg(now);
+            .arg(max_stalled as i64)
+            .arg(lock_duration_ms as i64);
 
         let recovered: i64 = self.backend.invoke_script(&inv).await?;
         Ok(recovered.max(0) as u32)
     }
 
-    pub async fn register_parent_children(&self, parent_id: &str, count: u32) -> Result<(), TurboPulseError> {
-        let dep_key = format!("{}:deps:{}", self.key_prefix, parent_id);
+    pub async fn register_parent_children(&self, parent_queue: &str, parent_id: &str, child_ids: &[String]) -> Result<(), TurboPulseError> {
+        if child_ids.is_empty() {
+            return Ok(());
+        }
+        let dep_key = self.deps_key(parent_queue, parent_id);
         let mut inv = self.register_parent_children_script.key(&dep_key);
-        inv.arg(count);
+        for id in child_ids {
+            inv.arg(id);
+        }
         let _: i64 = self.backend.invoke_script(&inv).await?;
         Ok(())
+    }
+
+    pub async fn resolve_parent_dep(&self, parent_queue: &str, parent_id: &str, child_id: &str) -> Result<bool, TurboPulseError> {
+        let dep_key = self.deps_key(parent_queue, parent_id);
+        let mut inv = self.resolve_parent_dep_script.key(&dep_key);
+        inv.key(self.wait_key(parent_queue))
+            .key(self.job_key(parent_queue, parent_id))
+            .key(self.seq_key(parent_queue))
+            .arg(parent_id)
+            .arg(child_id);
+
+        let res: i64 = self.backend.invoke_script(&inv).await?;
+        Ok(res == 1)
     }
 
     pub async fn update_data(&self, queue_name: &str, job_id: &str, data: Vec<u8>) -> Result<(), TurboPulseError> {
@@ -734,6 +999,6 @@ impl RedisQueue {
                 return Ok(());
             }
         }
-        Err(TurboPulseError::JobNotFound(job_id.to_string()))
+        Err(TurboPulseError::InvalidJobState("Job not found".to_string()))
     }
 }

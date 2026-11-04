@@ -112,6 +112,12 @@ pub struct JobConfig {
     pub repeat_limit: Option<u32>,
     /// Parent job ID for flow-producer job hierarchies
     pub parent_id: Option<String>,
+    /// Parent queue name for cross-queue flow dependencies
+    pub parent_queue: Option<String>,
+    /// Flow tree identifier
+    pub flow_id: Option<String>,
+    /// Whether this parent job is initialized in WaitingChildren state
+    pub is_waiting_children: Option<bool>,
     /// Deduplication key to prevent enqueueing duplicate active jobs
     pub dedup_key: Option<String>,
     /// Job expiration timestamp in ms (auto-aborts if not started before)
@@ -138,6 +144,9 @@ impl Default for JobConfig {
             repeat_every_ms: None,
             repeat_limit: None,
             parent_id: None,
+            parent_queue: None,
+            flow_id: None,
+            is_waiting_children: None,
             dedup_key: None,
             expiration_ms: None,
             weight: Some(1),

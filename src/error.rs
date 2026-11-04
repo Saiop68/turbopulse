@@ -43,7 +43,7 @@ impl From<TurboPulseError> for napi::Error {
             TurboPulseError::InvalidJobState(msg) => {
                 napi::Error::new(Status::GenericFailure, format!("LOCK_LOST: {}", msg))
             }
-            TurboPulseError::RateLimitExceeded { retry_after_ms: _, .. } => {
+            TurboPulseError::RateLimitExceeded { .. } => {
                 napi::Error::new(
                     Status::GenericFailure,
                     format!("RATE_LIMIT_EXCEEDED: {}", err),

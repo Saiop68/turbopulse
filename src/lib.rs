@@ -178,8 +178,14 @@ impl NativeQueue {
             name,
             queue_name: self.name.clone(),
             data: data.as_ref().to_vec(),
-            config: conf,
-            state: if delay_ms > 0 { JobState::Delayed } else { JobState::Waiting },
+            config: conf.clone(),
+            state: if conf.is_waiting_children == Some(true) {
+                JobState::WaitingChildren
+            } else if delay_ms > 0 {
+                JobState::Delayed
+            } else {
+                JobState::Waiting
+            },
             attempts_made: 0,
             stalled_count: 0,
             progress: 0,
@@ -212,8 +218,14 @@ impl NativeQueue {
                 name: item.name,
                 queue_name: self.name.clone(),
                 data: item.data.as_ref().to_vec(),
-                config: conf,
-                state: if delay_ms > 0 { JobState::Delayed } else { JobState::Waiting },
+                config: conf.clone(),
+                state: if conf.is_waiting_children == Some(true) {
+                    JobState::WaitingChildren
+                } else if delay_ms > 0 {
+                    JobState::Delayed
+                } else {
+                    JobState::Waiting
+                },
                 attempts_made: 0,
                 stalled_count: 0,
                 progress: 0,
@@ -232,35 +244,55 @@ impl NativeQueue {
 
     /// Fetches next prioritized, available job. Returns None if queue is empty or paused.
     #[napi]
-    pub async fn fetch_next(&self) -> Result<Option<JobDto>> {
-        let record_opt = self.engine.fetch_next_job(&self.name).await.map_err(Into::<napi::Error>::into)?;
+    pub async fn fetch_next(&self, lock_duration_ms: Option<u32>) -> Result<Option<JobDto>> {
+        let duration = lock_duration_ms.map(|d| d as u64);
+        let record_opt = self.engine.fetch_next_job(&self.name, duration).await.map_err(Into::<napi::Error>::into)?;
         Ok(record_opt.map(|r| r.to_dto()))
     }
 
     /// Fetches a batch of prioritized, available jobs
     #[napi]
-    pub async fn fetch_batch(&self, count: u32) -> Result<Vec<JobDto>> {
-        let records = self.engine.fetch_next_batch(&self.name, count as usize).await.map_err(Into::<napi::Error>::into)?;
+    pub async fn fetch_batch(&self, count: u32, lock_duration_ms: Option<u32>) -> Result<Vec<JobDto>> {
+        let duration = lock_duration_ms.map(|d| d as u64);
+        let records = self.engine.fetch_next_batch(&self.name, count as usize, duration).await.map_err(Into::<napi::Error>::into)?;
         Ok(records.into_iter().map(|r| r.to_dto()).collect())
     }
 
     /// Marks job as completed and stores optional binary result.
     #[napi]
-    pub async fn complete(&self, job_id: String, return_value: Option<Buffer>, lock_token: Option<String>) -> Result<bool> {
+    pub async fn complete(&self, job_id: String, return_value: Option<Buffer>, lock_token: String) -> Result<bool> {
+        if lock_token.trim().is_empty() {
+            return Err(napi::Error::new(
+                Status::InvalidArg,
+                "lock_token is required to complete a job (empty token is not allowed)",
+            ));
+        }
         let val = return_value.map(|b| b.as_ref().to_vec());
-        self.engine.complete_job(&self.name, &job_id, val, lock_token.as_deref()).await.map_err(Into::<napi::Error>::into)
+        self.engine.complete_job(&self.name, &job_id, val, &lock_token).await.map_err(Into::<napi::Error>::into)
     }
 
     /// Fails job. If retries remain, automatically calculates backoff with jitter and re-schedules.
     /// Returns true if permanently failed; false if retry scheduled.
     #[napi]
-    pub async fn fail(&self, job_id: String, error_msg: String, lock_token: Option<String>) -> Result<bool> {
-        self.engine.fail_job(&self.name, &job_id, &error_msg, lock_token.as_deref()).await.map_err(Into::<napi::Error>::into)
+    pub async fn fail(&self, job_id: String, error_msg: String, lock_token: String) -> Result<bool> {
+        if lock_token.trim().is_empty() {
+            return Err(napi::Error::new(
+                Status::InvalidArg,
+                "lock_token is required to fail a job (empty token is not allowed)",
+            ));
+        }
+        self.engine.fail_job(&self.name, &job_id, &error_msg, &lock_token).await.map_err(Into::<napi::Error>::into)
     }
 
     /// Renews active lock on an executing job (heartbeat).
     #[napi]
     pub async fn renew_lock(&self, job_id: String, lock_token: String, lock_duration_ms: Option<u32>) -> Result<bool> {
+        if lock_token.trim().is_empty() {
+            return Err(napi::Error::new(
+                Status::InvalidArg,
+                "lock_token is required to renew lock (empty token is not allowed)",
+            ));
+        }
         let duration = lock_duration_ms.unwrap_or(30000);
         self.engine.renew_lock(&self.name, &job_id, &lock_token, duration).await.map_err(Into::<napi::Error>::into)
     }
@@ -302,6 +334,14 @@ impl NativeQueue {
         self.engine.drain(&self.name).await.map_err(Into::<napi::Error>::into)
     }
 
+    /// Obliterates queue completely (removes all keys and records).
+    /// If force is false, returns error if active jobs exist.
+    #[napi]
+    pub async fn obliterate(&self, force: Option<bool>) -> Result<u32> {
+        let f = force.unwrap_or(false);
+        self.engine.obliterate(&self.name, f).await.map_err(Into::<napi::Error>::into)
+    }
+
     /// Cleans jobs older than grace_ms in the specified state ('completed', 'failed')
     #[napi]
     pub async fn clean(&self, grace_ms: u32, limit: Option<u32>, state: Option<String>) -> Result<u32> {
@@ -330,10 +370,16 @@ impl NativeQueue {
         self.engine.update_data(&self.name, &job_id, bytes).await.map_err(Into::<napi::Error>::into)
     }
 
-    /// Registers parent with children count for DAG FlowProducer
+    /// Registers parent with children IDs for DAG FlowProducer
     #[napi]
-    pub async fn register_parent_children(&self, parent_id: String, count: u32) -> Result<()> {
-        self.engine.register_parent_children(&self.name, &parent_id, count).await.map_err(Into::<napi::Error>::into)
+    pub async fn register_parent_children(&self, parent_id: String, child_ids: Vec<String>) -> Result<()> {
+        self.engine.register_parent_children(&self.name, &parent_id, &child_ids).await.map_err(Into::<napi::Error>::into)
+    }
+
+    /// Resolves child dependency for parent job
+    #[napi]
+    pub async fn resolve_parent_dep(&self, parent_id: String, child_id: String) -> Result<bool> {
+        self.engine.resolve_parent_dep(&self.name, &parent_id, &child_id).await.map_err(Into::<napi::Error>::into)
     }
 }
 

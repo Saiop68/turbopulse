@@ -79,6 +79,12 @@ export interface JobConfig {
   repeatLimit?: number
   /** Parent job ID for flow-producer job hierarchies */
   parentId?: string
+  /** Parent queue name for cross-queue flow dependencies */
+  parentQueue?: string
+  /** Flow tree identifier */
+  flowId?: string
+  /** Whether this parent job is initialized in WaitingChildren state */
+  isWaitingChildren?: boolean
   /** Deduplication key to prevent enqueueing duplicate active jobs */
   dedupKey?: string
   /** Job expiration timestamp in ms (auto-aborts if not started before) */
@@ -186,16 +192,16 @@ export declare class NativeQueue {
   /** Atomically enqueues a bulk batch of jobs */
   addBulk(items: Array<BulkJobInput>): Promise<Array<string>>
   /** Fetches next prioritized, available job. Returns None if queue is empty or paused. */
-  fetchNext(): Promise<JobDto | null>
+  fetchNext(lockDurationMs?: number | undefined | null): Promise<JobDto | null>
   /** Fetches a batch of prioritized, available jobs */
-  fetchBatch(count: number): Promise<Array<JobDto>>
+  fetchBatch(count: number, lockDurationMs?: number | undefined | null): Promise<Array<JobDto>>
   /** Marks job as completed and stores optional binary result. */
-  complete(jobId: string, returnValue?: Buffer | undefined | null, lockToken?: string | undefined | null): Promise<boolean>
+  complete(jobId: string, returnValue: Buffer | undefined | null, lockToken: string): Promise<boolean>
   /**
    * Fails job. If retries remain, automatically calculates backoff with jitter and re-schedules.
    * Returns true if permanently failed; false if retry scheduled.
    */
-  fail(jobId: string, errorMsg: string, lockToken?: string | undefined | null): Promise<boolean>
+  fail(jobId: string, errorMsg: string, lockToken: string): Promise<boolean>
   /** Renews active lock on an executing job (heartbeat). */
   renewLock(jobId: string, lockToken: string, lockDurationMs?: number | undefined | null): Promise<boolean>
   /** Updates progress percentage (0 - 100) for a job. */
@@ -210,6 +216,11 @@ export declare class NativeQueue {
   resume(): Promise<void>
   /** Clears waiting and delayed jobs from queue. */
   drain(): Promise<void>
+  /**
+   * Obliterates queue completely (removes all keys and records).
+   * If force is false, returns error if active jobs exist.
+   */
+  obliterate(force?: boolean | undefined | null): Promise<number>
   /** Cleans jobs older than grace_ms in the specified state ('completed', 'failed') */
   clean(graceMs: number, limit?: number | undefined | null, state?: string | undefined | null): Promise<number>
   /** Promotes delayed job to waiting queue immediately */
@@ -218,8 +229,10 @@ export declare class NativeQueue {
   recoverStalled(lockDurationMs: number, maxStalled?: number | undefined | null): Promise<number>
   /** Updates arbitrary job binary payload */
   updateData(jobId: string, data: Buffer): Promise<void>
-  /** Registers parent with children count for DAG FlowProducer */
-  registerParentChildren(parentId: string, count: number): Promise<void>
+  /** Registers parent with children IDs for DAG FlowProducer */
+  registerParentChildren(parentId: string, childIds: Array<string>): Promise<void>
+  /** Resolves child dependency for parent job */
+  resolveParentDep(parentId: string, childId: string): Promise<boolean>
 }
 /** Core native engine holding shared state for In-Memory or Redis distributed backends. */
 export declare class NativeEngine {

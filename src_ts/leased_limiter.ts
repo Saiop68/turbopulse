@@ -85,6 +85,7 @@ export class LeasedRateLimiter {
   public acquireFast(tokens: number = 1): boolean {
     if (this.localReservoir >= tokens) {
       this.localReservoir -= tokens;
+      this.activeConcurrency++;
       if (this.localReservoir <= this.lowWatermark && !this.isRefilling) {
         this.prefetchLease();
       }

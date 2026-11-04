@@ -176,5 +176,18 @@ impl RedisBackend {
             }
         }
     }
+
+    pub async fn incr(&self, key: &str) -> Result<i64, TurboPulseError> {
+        match self {
+            RedisBackend::Standalone(m) => {
+                let mut conn = m.clone();
+                conn.incr(key, 1).await.map_err(TurboPulseError::Redis)
+            }
+            RedisBackend::Cluster(c) => {
+                let mut conn = c.clone();
+                conn.incr(key, 1).await.map_err(TurboPulseError::Redis)
+            }
+        }
+    }
 }
 

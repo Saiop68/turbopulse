@@ -28,17 +28,26 @@ impl QueueEngine {
         }
     }
 
-    pub async fn fetch_next_job(&self, queue_name: &str) -> Result<Option<JobRecord>, TurboPulseError> {
+    pub async fn fetch_next_job(
+        &self,
+        queue_name: &str,
+        lock_duration_ms: Option<u64>,
+    ) -> Result<Option<JobRecord>, TurboPulseError> {
         match self {
-            QueueEngine::InMemory(q) => q.fetch_next_job(queue_name),
-            QueueEngine::Redis(q) => q.fetch_next_job(queue_name).await,
+            QueueEngine::InMemory(q) => q.fetch_next_job(queue_name, lock_duration_ms),
+            QueueEngine::Redis(q) => q.fetch_next_job(queue_name, lock_duration_ms).await,
         }
     }
 
-    pub async fn fetch_next_batch(&self, queue_name: &str, count: usize) -> Result<Vec<JobRecord>, TurboPulseError> {
+    pub async fn fetch_next_batch(
+        &self,
+        queue_name: &str,
+        count: usize,
+        lock_duration_ms: Option<u64>,
+    ) -> Result<Vec<JobRecord>, TurboPulseError> {
         match self {
-            QueueEngine::InMemory(q) => q.fetch_next_batch(queue_name, count),
-            QueueEngine::Redis(q) => q.fetch_next_batch(queue_name, count).await,
+            QueueEngine::InMemory(q) => q.fetch_next_batch(queue_name, count, lock_duration_ms),
+            QueueEngine::Redis(q) => q.fetch_next_batch(queue_name, count, lock_duration_ms).await,
         }
     }
 
@@ -47,12 +56,32 @@ impl QueueEngine {
         queue_name: &str,
         job_id: &str,
         return_value: Option<Vec<u8>>,
-        lock_token: Option<&str>,
+        lock_token: &str,
     ) -> Result<bool, TurboPulseError> {
-        match self {
+        // Read parent dependency info before completing if available
+        let parent_info = if let Ok(Some(j)) = self.get_job(queue_name, job_id).await {
+            if let Some(pid) = j.config.parent_id {
+                let pq = j.config.parent_queue.unwrap_or_else(|| queue_name.to_string());
+                Some((pq, pid))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let res = match self {
             QueueEngine::InMemory(q) => q.complete_job(queue_name, job_id, return_value, lock_token),
             QueueEngine::Redis(q) => q.complete_job(queue_name, job_id, return_value, lock_token).await,
+        }?;
+
+        if res {
+            if let Some((pq, pid)) = parent_info {
+                let _ = self.resolve_parent_dep(&pq, &pid, job_id).await;
+            }
         }
+
+        Ok(res)
     }
 
     pub async fn fail_job(
@@ -60,7 +89,7 @@ impl QueueEngine {
         queue_name: &str,
         job_id: &str,
         error_msg: &str,
-        lock_token: Option<&str>,
+        lock_token: &str,
     ) -> Result<bool, TurboPulseError> {
         match self {
             QueueEngine::InMemory(q) => q.fail_job(queue_name, job_id, error_msg, lock_token),
@@ -137,6 +166,13 @@ impl QueueEngine {
         }
     }
 
+    pub async fn obliterate(&self, queue_name: &str, force: bool) -> Result<u32, TurboPulseError> {
+        match self {
+            QueueEngine::InMemory(q) => q.obliterate(queue_name, force),
+            QueueEngine::Redis(q) => q.obliterate(queue_name, force).await,
+        }
+    }
+
     pub async fn clean(&self, queue_name: &str, grace_ms: u64, limit: u32, state_type: &str) -> Result<u32, TurboPulseError> {
         match self {
             QueueEngine::InMemory(q) => Ok(q.clean(queue_name, grace_ms, limit, state_type)),
@@ -165,13 +201,30 @@ impl QueueEngine {
         }
     }
 
-    pub async fn register_parent_children(&self, _queue_name: &str, parent_id: &str, count: u32) -> Result<(), TurboPulseError> {
+    pub async fn register_parent_children(
+        &self,
+        parent_queue: &str,
+        parent_id: &str,
+        child_ids: &[String],
+    ) -> Result<(), TurboPulseError> {
         match self {
             QueueEngine::InMemory(q) => {
-                q.register_parent_children(parent_id, count);
+                q.register_parent_children(parent_id, child_ids);
                 Ok(())
             }
-            QueueEngine::Redis(q) => q.register_parent_children(parent_id, count).await,
+            QueueEngine::Redis(q) => q.register_parent_children(parent_queue, parent_id, child_ids).await,
+        }
+    }
+
+    pub async fn resolve_parent_dep(
+        &self,
+        parent_queue: &str,
+        parent_id: &str,
+        child_id: &str,
+    ) -> Result<bool, TurboPulseError> {
+        match self {
+            QueueEngine::InMemory(q) => q.resolve_parent_dep(parent_queue, parent_id, child_id),
+            QueueEngine::Redis(q) => q.resolve_parent_dep(parent_queue, parent_id, child_id).await,
         }
     }
 }

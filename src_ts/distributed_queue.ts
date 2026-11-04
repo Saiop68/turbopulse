@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 import {
   QueueJobOptions,
   FlowJob,
@@ -31,7 +32,12 @@ export class Job<DataType = any, ResultType = any, NameType extends string = str
   public attemptsMade: number = 0;
   public stalledCount: number = 0;
   public lockToken?: string;
+  public signal?: AbortSignal;
   public returnvalue: ResultType = null as any;
+
+  public get token(): string | undefined {
+    return this.lockToken;
+  }
 
   public get returnValue(): ResultType {
     return this.returnvalue;
@@ -129,7 +135,9 @@ export class Job<DataType = any, ResultType = any, NameType extends string = str
    * Discards the job permanently
    */
   public async discard(): Promise<void> {
-    await this.queueBinding.fail(this.id, 'Discarded by user');
+    if (this.lockToken) {
+      await this.queueBinding.fail(this.id, 'Discarded by user', this.lockToken);
+    }
   }
 
   /**
@@ -256,6 +264,8 @@ export class Queue<DataType = any, ResultType = any, NameType extends string = s
       repeatEveryMs: mergedOpts.repeat?.every,
       repeatLimit: mergedOpts.repeat?.limit,
       parentId: mergedOpts.parent?.id,
+      parentQueue: mergedOpts.parent?.queue,
+      isWaitingChildren: (mergedOpts as any).isWaitingChildren,
       dedupKey: mergedOpts.deduplication?.id,
     };
 
@@ -342,6 +352,8 @@ export class Queue<DataType = any, ResultType = any, NameType extends string = s
         repeatEveryMs: mergedOpts.repeat?.every,
         repeatLimit: mergedOpts.repeat?.limit,
         parentId: mergedOpts.parent?.id,
+        parentQueue: mergedOpts.parent?.queue,
+        isWaitingChildren: (mergedOpts as any).isWaitingChildren,
         dedupKey: mergedOpts.deduplication?.id,
       };
       return {
@@ -426,14 +438,12 @@ export class Queue<DataType = any, ResultType = any, NameType extends string = s
 
   public async drain(): Promise<void> {
     await this.readyPromise;
-    await this.nativeBinding.clean(0, 1000000, 'wait');
+    await this.nativeBinding.drain();
   }
 
-  public async obliterate(): Promise<void> {
+  public async obliterate(opts: { force?: boolean } = {}): Promise<void> {
     await this.readyPromise;
-    await this.nativeBinding.clean(0, 1000000, 'completed');
-    await this.nativeBinding.clean(0, 1000000, 'failed');
-    await this.nativeBinding.clean(0, 1000000, 'wait');
+    await this.nativeBinding.obliterate(opts?.force ?? false);
   }
 
   public async close(): Promise<void> {}
@@ -617,11 +627,32 @@ export class Worker<DataType = any, ResultType = any, NameType extends string = 
     return this.isRunningState;
   }
 
-  public async close(): Promise<void> {
+  private isClosingState: boolean = false;
+
+  public async close(force?: boolean): Promise<void> {
+    if (!this.isRunningState) return;
+    this.isClosingState = true;
     this.isRunningState = false;
     this.emit('closing');
     if (this.stalledTimer) clearInterval(this.stalledTimer);
-    this.emit('closed');
+    if (this.loopTimer) clearTimeout(this.loopTimer);
+
+    if (force || this.activeConcurrency === 0) {
+      this.isClosingState = false;
+      this.emit('closed');
+      return;
+    }
+
+    return new Promise<void>((resolve) => {
+      const interval = setInterval(() => {
+        if (this.activeConcurrency === 0) {
+          clearInterval(interval);
+          this.isClosingState = false;
+          this.emit('closed');
+          resolve();
+        }
+      }, 25);
+    });
   }
 
   private async runSlot(_slotId: number): Promise<void> {
@@ -643,7 +674,7 @@ export class Worker<DataType = any, ResultType = any, NameType extends string = 
 
       let dto: JobDto | null = null;
       try {
-        dto = await this.queueBinding.fetchNext();
+        dto = await this.queueBinding.fetchNext(this.options.lockDuration || 30000);
       } catch (err) {
         this.emit('error', err);
       }
@@ -693,25 +724,36 @@ export class Worker<DataType = any, ResultType = any, NameType extends string = 
       dto
     );
 
+    const abortController = new AbortController();
+    job.signal = abortController.signal;
+    (job as any).abortSignal = abortController.signal;
+
     this.emit('active', job);
 
     const lockDuration = this.options.lockDuration || 30000;
-    const lockRenewInterval = this.options.lockRenewTime || Math.max(100, Math.floor(lockDuration / 3));
+    const lockRenewInterval = this.options.lockRenewTime || Math.max(25, Math.floor(lockDuration / 3));
     let heartbeatTimer: NodeJS.Timeout | null = null;
     let lockLost = false;
+    let renewingLock = false;
 
     if (job.lockToken) {
       heartbeatTimer = setInterval(async () => {
+        if (renewingLock || lockLost) return;
+        renewingLock = true;
         try {
           const renewed = await this.queueBinding.renewLock(job.id, job.lockToken!, lockDuration);
           if (!renewed) {
             lockLost = true;
+            abortController.abort(new Error(`LOCK_LOST: Worker lost lock for job ${job.id}`));
             if (heartbeatTimer) clearInterval(heartbeatTimer);
             this.emit('error', new Error(`LOCK_LOST: Worker lost lock for job ${job.id}`));
           }
-        } catch {
+        } catch (err: any) {
           lockLost = true;
+          abortController.abort(err);
           if (heartbeatTimer) clearInterval(heartbeatTimer);
+        } finally {
+          renewingLock = false;
         }
       }, lockRenewInterval);
     }
@@ -724,17 +766,21 @@ export class Worker<DataType = any, ResultType = any, NameType extends string = 
         throw new Error(`LOCK_LOST: Job ${job.id} was recovered by another worker while executing`);
       }
 
+      if (!job.lockToken) {
+        throw new Error(`LOCK_LOST: Missing lock token for job ${job.id}`);
+      }
+
       const resBuf = result !== undefined ? Buffer.from(JSON.stringify(result), 'utf-8') : null;
-      await this.queueBinding.complete(job.id, resBuf, job.lockToken || null);
+      await this.queueBinding.complete(job.id, resBuf, job.lockToken);
 
       this.emit('completed', job, result);
     } catch (err: any) {
       const errMsg = err?.message || String(err);
       job.failedReason = errMsg;
 
-      if (!lockLost) {
+      if (!lockLost && job.lockToken) {
         try {
-          const permanentlyFailed = await this.queueBinding.fail(job.id, errMsg, job.lockToken || null);
+          const permanentlyFailed = await this.queueBinding.fail(job.id, errMsg, job.lockToken);
           if (permanentlyFailed) {
             this.emit('failed', job, err);
           }
@@ -792,33 +838,50 @@ export class FlowProducer {
    */
   public async add<T = any>(flow: FlowJob<T>): Promise<FlowNode<T>> {
     this.validateTree(flow);
+    return this.addInternal(flow);
+  }
 
+  private async addInternal<T = any>(
+    flow: FlowJob<T>,
+    parentRef?: { id: string; queue: string }
+  ): Promise<FlowNode<T>> {
     const parentQueue = new Queue<T>(flow.queueName, { connection: this.options.connection });
     await parentQueue.waitUntilReady();
 
-    const totalChildren = flow.children?.length || 0;
+    const parentId = flow.opts?.jobId || randomUUID();
+    const children = flow.children || [];
+    const hasChildren = children.length > 0;
+
+    const childDescriptors = children.map((child) => ({
+      child,
+      id: child.opts?.jobId || randomUUID(),
+    }));
+    const childIds = childDescriptors.map((c) => c.id);
+
+    if (hasChildren) {
+      await parentQueue.binding.registerParentChildren(parentId, childIds);
+    }
+
+    const mergedOpts: QueueJobOptions & { isWaitingChildren?: boolean } = {
+      ...flow.opts,
+      jobId: parentId,
+      parent: parentRef,
+      isWaitingChildren: hasChildren,
+    };
+
     const parentJob = await parentQueue.add(
       flow.name as any,
       flow.data as any,
-      {
-        ...flow.opts,
-        delay: totalChildren > 0 ? 86400000 : flow.opts?.delay,
-      }
+      mergedOpts
     );
 
     const childNodes: FlowNode[] = [];
-
-    if (totalChildren > 0) {
-      await parentQueue.binding.registerParentChildren(parentJob.id, totalChildren);
-
-      for (const childFlow of flow.children!) {
-        const childOpts: QueueJobOptions = {
-          ...childFlow.opts,
-          parent: { id: parentJob.id, queue: flow.queueName },
-        };
-        const childNode = await this.add({ ...childFlow, opts: childOpts });
-        childNodes.push(childNode);
-      }
+    for (const desc of childDescriptors) {
+      const childNode = await this.addInternal(
+        { ...desc.child, opts: { ...desc.child.opts, jobId: desc.id } },
+        { id: parentId, queue: flow.queueName }
+      );
+      childNodes.push(childNode);
     }
 
     return {

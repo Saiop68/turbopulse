@@ -20,6 +20,7 @@ export enum JobState {
   Active = 'Active',
   Completed = 'Completed',
   Failed = 'Failed',
+  WaitingChildren = 'WaitingChildren',
 }
 
 export enum RateLimiterStrategy {
@@ -140,6 +141,9 @@ export interface JobConfig {
   repeatEveryMs?: number;
   repeatLimit?: number;
   parentId?: string;
+  parentQueue?: string;
+  flowId?: string;
+  isWaitingChildren?: boolean;
   dedupKey?: string;
   expirationMs?: number;
   weight?: number;
@@ -266,10 +270,10 @@ export interface BulkJobInput {
 export interface NativeQueueBinding {
   add(jobId: string | null | undefined, name: string, data: Buffer, config?: any): Promise<string>;
   addBulk(items: BulkJobInput[]): Promise<string[]>;
-  fetchNext(): Promise<JobDto | null>;
-  fetchBatch(count: number): Promise<JobDto[]>;
-  complete(jobId: string, returnValue?: Buffer | null, lockToken?: string | null): Promise<boolean>;
-  fail(jobId: string, errorMsg: string, lockToken?: string | null): Promise<boolean>;
+  fetchNext(lockDurationMs?: number): Promise<JobDto | null>;
+  fetchBatch(count: number, lockDurationMs?: number): Promise<JobDto[]>;
+  complete(jobId: string, returnValue: Buffer | null | undefined, lockToken: string): Promise<boolean>;
+  fail(jobId: string, errorMsg: string, lockToken: string): Promise<boolean>;
   renewLock(jobId: string, lockToken: string, lockDurationMs?: number): Promise<boolean>;
   updateProgress(jobId: string, progress: number): Promise<void>;
   getJob(jobId: string): Promise<JobDto | null>;
@@ -277,10 +281,12 @@ export interface NativeQueueBinding {
   pause(): Promise<void>;
   resume(): Promise<void>;
   drain(): Promise<void>;
+  obliterate(force?: boolean): Promise<number>;
   clean(graceMs: number, limit?: number, state?: string): Promise<number>;
   promote(jobId: string): Promise<boolean>;
   recoverStalled(lockDurationMs: number, maxStalled?: number): Promise<number>;
   updateData(jobId: string, data: Buffer): Promise<void>;
-  registerParentChildren(parentId: string, count: number): Promise<void> | void;
+  registerParentChildren(parentId: string, childIds: string[]): Promise<void> | void;
+  resolveParentDep(parentId: string, childId: string): Promise<boolean>;
 }
 

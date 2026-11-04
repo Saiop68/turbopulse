@@ -42,6 +42,12 @@ pub struct InMemoryRateLimiter {
     buckets: DashMap<String, Arc<BucketState>>,
 }
 
+impl Default for InMemoryRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryRateLimiter {
     pub fn new() -> Self {
         Self {

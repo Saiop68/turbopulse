@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering as AtomicOrdering};
+use std::collections::{BinaryHeap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use dashmap::DashMap;
 use parking_lot::Mutex;
@@ -10,7 +10,7 @@ use crate::error::TurboPulseError;
 use crate::queue::job::{JobCounts, JobRecord, JobState};
 use crate::utils::time::{calculate_backoff, current_time_ms};
 
-/// Element in the waiting priority queue
+/// Element in the waiting max-heap
 #[derive(Debug, Eq, PartialEq)]
 struct PrioritizedJob {
     priority: i32,
@@ -78,12 +78,18 @@ impl QueueState {
 }
 
 /// Production-grade In-Memory Queue engine.
-/// Provides full queue feature parity (priority, delays, retries with exponential backoff, progress)
+/// Provides full queue feature parity (priority, delays, retries with backoff, progress)
 /// completely outside the V8 heap in native memory.
 pub struct InMemoryQueue {
     queues: DashMap<String, Arc<QueueState>>,
     jobs: DashMap<String, JobRecord>,
-    parent_pending: DashMap<String, AtomicU32>,
+    parent_dependencies: DashMap<String, Arc<Mutex<HashSet<String>>>>,
+}
+
+impl Default for InMemoryQueue {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InMemoryQueue {
@@ -91,12 +97,55 @@ impl InMemoryQueue {
         Self {
             queues: DashMap::new(),
             jobs: DashMap::new(),
-            parent_pending: DashMap::new(),
+            parent_dependencies: DashMap::new(),
         }
     }
 
-    pub fn register_parent_children(&self, parent_id: &str, count: u32) {
-        self.parent_pending.insert(parent_id.to_string(), AtomicU32::new(count));
+    pub fn register_parent_children(&self, parent_id: &str, child_ids: &[String]) {
+        let entry = self
+            .parent_dependencies
+            .entry(parent_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(HashSet::new())))
+            .clone();
+        let mut set = entry.lock();
+        for id in child_ids {
+            set.insert(id.clone());
+        }
+    }
+
+    pub fn resolve_parent_dep(
+        &self,
+        parent_queue: &str,
+        parent_id: &str,
+        child_id: &str,
+    ) -> Result<bool, TurboPulseError> {
+        let mut should_promote = false;
+        if let Some(entry) = self.parent_dependencies.get(parent_id) {
+            let mut set = entry.value().lock();
+            set.remove(child_id);
+            if set.is_empty() {
+                should_promote = true;
+            }
+        }
+
+        if should_promote {
+            self.parent_dependencies.remove(parent_id);
+            if let Some(mut parent) = self.jobs.get_mut(parent_id) {
+                if parent.state == JobState::WaitingChildren {
+                    parent.state = JobState::Waiting;
+                    let pq = self.get_or_create_queue(parent_queue);
+                    let seq = pq.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
+                    let mut waiting_guard = pq.waiting.lock();
+                    waiting_guard.push(PrioritizedJob {
+                        priority: parent.config.priority.unwrap_or(0),
+                        sequence: seq,
+                        job_id: parent_id.to_string(),
+                    });
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     fn get_or_create_queue(&self, queue_name: &str) -> Arc<QueueState> {
@@ -107,11 +156,20 @@ impl InMemoryQueue {
     }
 
     pub fn push_job(&self, job: JobRecord) -> Result<(), TurboPulseError> {
+        if self.jobs.contains_key(&job.id) {
+            return Err(TurboPulseError::InvalidJobState(format!(
+                "Job with ID {} already exists",
+                job.id
+            )));
+        }
+
         let q = self.get_or_create_queue(&job.queue_name);
         let job_id = job.id.clone();
         let now = current_time_ms();
 
-        if job.delay_until_ms > now {
+        if job.state == JobState::WaitingChildren {
+            // Blocked: parent waits in WaitingChildren state until dependencies resolve
+        } else if job.delay_until_ms > now {
             let mut delayed_guard = q.delayed.lock();
             delayed_guard.push(DelayedJob {
                 delay_until_ms: job.delay_until_ms,
@@ -120,7 +178,6 @@ impl InMemoryQueue {
         } else {
             let raw_seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
             let seq = if job.config.lifo.unwrap_or(false) {
-                // For LIFO, invert the sequence so it ranks higher in the heap for the same priority
                 u64::MAX - raw_seq
             } else {
                 raw_seq
@@ -138,6 +195,17 @@ impl InMemoryQueue {
     }
 
     pub fn push_jobs_bulk(&self, jobs: Vec<JobRecord>) -> Result<Vec<String>, TurboPulseError> {
+        // Pre-validate: reject duplicates within batch or existing records
+        let mut seen = HashSet::new();
+        for job in &jobs {
+            if !seen.insert(&job.id) || self.jobs.contains_key(&job.id) {
+                return Err(TurboPulseError::InvalidJobState(format!(
+                    "Bulk insert failed: duplicate job ID {} detected",
+                    job.id
+                )));
+            }
+        }
+
         let mut ids = Vec::with_capacity(jobs.len());
         for job in jobs {
             let id = job.id.clone();
@@ -147,10 +215,15 @@ impl InMemoryQueue {
         Ok(ids)
     }
 
-    pub fn fetch_next_batch(&self, queue_name: &str, count: usize) -> Result<Vec<JobRecord>, TurboPulseError> {
+    pub fn fetch_next_batch(
+        &self,
+        queue_name: &str,
+        count: usize,
+        lock_duration_ms: Option<u64>,
+    ) -> Result<Vec<JobRecord>, TurboPulseError> {
         let mut list = Vec::with_capacity(count);
         for _ in 0..count {
-            if let Some(j) = self.fetch_next_job(queue_name)? {
+            if let Some(j) = self.fetch_next_job(queue_name, lock_duration_ms)? {
                 list.push(j);
             } else {
                 break;
@@ -160,7 +233,11 @@ impl InMemoryQueue {
     }
 
     /// Moves any matured delayed jobs into the waiting queue and pops the next waiting job
-    pub fn fetch_next_job(&self, queue_name: &str) -> Result<Option<JobRecord>, TurboPulseError> {
+    pub fn fetch_next_job(
+        &self,
+        queue_name: &str,
+        lock_duration_ms: Option<u64>,
+    ) -> Result<Option<JobRecord>, TurboPulseError> {
         let q = self.get_or_create_queue(queue_name);
 
         if q.paused.load(AtomicOrdering::Relaxed) {
@@ -168,6 +245,7 @@ impl InMemoryQueue {
         }
 
         let now = current_time_ms();
+        let lock_duration = lock_duration_ms.unwrap_or(30000);
 
         // 1. Promote matured delayed jobs into waiting
         {
@@ -178,15 +256,13 @@ impl InMemoryQueue {
                 if top.delay_until_ms <= now {
                     let delayed_item = delayed_guard.pop().unwrap();
                     if let Some(mut job) = self.jobs.get_mut(&delayed_item.job_id) {
-                        if job.state == JobState::Delayed {
-                            job.state = JobState::Waiting;
-                            let seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
-                            waiting_guard.push(PrioritizedJob {
-                                priority: job.config.priority.unwrap_or(0),
-                                sequence: seq,
-                                job_id: delayed_item.job_id,
-                            });
-                        }
+                        job.state = JobState::Waiting;
+                        let seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
+                        waiting_guard.push(PrioritizedJob {
+                            priority: job.config.priority.unwrap_or(0),
+                            sequence: seq,
+                            job_id: delayed_item.job_id,
+                        });
                     }
                 } else {
                     break;
@@ -194,7 +270,7 @@ impl InMemoryQueue {
             }
         }
 
-        // 2. Pop next job from waiting queue
+        // 2. Pop highest priority waiting job
         let mut waiting_guard = q.waiting.lock();
         while let Some(p_job) = waiting_guard.pop() {
             if let Some(mut job) = self.jobs.get_mut(&p_job.job_id) {
@@ -205,7 +281,8 @@ impl InMemoryQueue {
                     let lock_token = format!("{}-{}", now, uuid::Uuid::new_v4());
                     job.lock_token = Some(lock_token);
 
-                    q.active_ids.insert(p_job.job_id.clone(), now);
+                    // Active sorted set equivalent: stores lease expiration
+                    q.active_ids.insert(p_job.job_id.clone(), now + lock_duration);
                     return Ok(Some(job.clone()));
                 }
             }
@@ -219,63 +296,82 @@ impl InMemoryQueue {
         queue_name: &str,
         job_id: &str,
         return_value: Option<Vec<u8>>,
-        lock_token: Option<&str>,
+        lock_token: &str,
     ) -> Result<bool, TurboPulseError> {
+        if lock_token.trim().is_empty() {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Missing lock token".to_string(),
+            ));
+        }
+
         let q = self.get_or_create_queue(queue_name);
         let now = current_time_ms();
 
+        let mut job = match self.jobs.get_mut(job_id) {
+            Some(j) => j,
+            None => return Err(TurboPulseError::InvalidJobState("Job not found".to_string())),
+        };
+
+        if job.state != JobState::Active {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Job is not in Active state".to_string(),
+            ));
+        }
+
+        if job.lock_token.as_deref() != Some(lock_token) {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Lock token mismatch".to_string(),
+            ));
+        }
+
+        if let Some(expire) = q.active_ids.get(job_id) {
+            if *expire < now {
+                return Err(TurboPulseError::InvalidJobState(
+                    "LOCK_LOST: Active lease has expired".to_string(),
+                ));
+            }
+        } else {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Job is not in active index".to_string(),
+            ));
+        }
+
+        // Invalidate lock token and remove from active index
+        job.lock_token = None;
+        q.active_ids.remove(job_id);
+
+        job.state = JobState::Completed;
+        job.finished_at = Some(now);
+        job.return_value = return_value;
+        job.progress = 100;
+
+        let remove_now = job.config.remove_on_complete.unwrap_or(false);
+
+        // Check repeat options
         let mut repeat_to_schedule: Option<JobRecord> = None;
-        let mut parent_to_promote: Option<String> = None;
-        let mut remove_now = false;
-
-        if let Some(mut job) = self.jobs.get_mut(job_id) {
-            if let Some(token) = lock_token {
-                if !token.is_empty() {
-                    if let Some(ref current) = job.lock_token {
-                        if current != token {
-                            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost or expired".to_string()));
-                        }
-                    }
-                }
-            }
-
-            q.active_ids.remove(job_id);
-            job.state = JobState::Completed;
-            job.finished_at = Some(now);
-            job.return_value = return_value;
-            job.progress = 100;
-
-            if job.config.remove_on_complete.unwrap_or(false) {
-                remove_now = true;
-            }
-
-            // Check repeat options (repeat_every_ms, repeat_limit)
-            if let Some(every_ms) = job.config.repeat_every_ms {
-                let limit = job.config.repeat_limit.unwrap_or(u32::MAX);
-                if job.attempts_made < limit {
-                    let mut next_job = job.clone();
-                    next_job.id = format!("{}:{}", job.id, now);
-                    next_job.state = JobState::Delayed;
-                    next_job.delay_until_ms = now + every_ms as u64;
-                    next_job.created_at = now;
-                    next_job.processed_at = None;
-                    next_job.finished_at = None;
-                    next_job.attempts_made = 0;
-                    next_job.stalled_count = 0;
-                    repeat_to_schedule = Some(next_job);
-                }
-            }
-
-            // Check parent-child DAG dependency
-            if let Some(ref p_id) = job.config.parent_id {
-                if let Some(entry) = self.parent_pending.get(p_id) {
-                    let prev = entry.value().fetch_sub(1, AtomicOrdering::SeqCst);
-                    if prev <= 1 {
-                        parent_to_promote = Some(p_id.clone());
-                    }
-                }
+        if let Some(every_ms) = job.config.repeat_every_ms {
+            let limit = job.config.repeat_limit.unwrap_or(u32::MAX);
+            if job.attempts_made < limit {
+                let mut next_job = job.clone();
+                next_job.id = format!("{}:{}", job.id, now);
+                next_job.state = JobState::Delayed;
+                next_job.delay_until_ms = now + every_ms as u64;
+                next_job.created_at = now;
+                next_job.processed_at = None;
+                next_job.finished_at = None;
+                next_job.attempts_made = 0;
+                next_job.stalled_count = 0;
+                repeat_to_schedule = Some(next_job);
             }
         }
+
+        let parent_info = if let Some(ref p_id) = job.config.parent_id {
+            Some((job.config.parent_queue.clone().unwrap_or_else(|| queue_name.to_string()), p_id.clone()))
+        } else {
+            None
+        };
+
+        drop(job);
 
         if remove_now {
             self.jobs.remove(job_id);
@@ -283,93 +379,106 @@ impl InMemoryQueue {
             q.completed_ids.insert(job_id.to_string(), now);
         }
 
-        // Reschedule recurring job if needed
         if let Some(rpt) = repeat_to_schedule {
             let _ = self.push_job(rpt);
         }
 
-        // Promote parent in flow if all children completed
-        if let Some(p_id) = parent_to_promote {
-            self.parent_pending.remove(&p_id);
-            let parent_queue = self.jobs.get(&p_id).map(|j| j.queue_name.clone()).unwrap_or_else(|| queue_name.to_string());
-            let _ = self.promote(&parent_queue, &p_id);
+        if let Some((pq, pid)) = parent_info {
+            let _ = self.resolve_parent_dep(&pq, &pid, job_id);
         }
 
         Ok(true)
     }
 
-    /// Fails job; if retries remain, schedules retry with exponential backoff; else marks failed.
-    /// Returns true if permanently failed, false if scheduled for retry.
     pub fn fail_job(
         &self,
         queue_name: &str,
         job_id: &str,
         error_msg: &str,
-        lock_token: Option<&str>,
+        lock_token: &str,
     ) -> Result<bool, TurboPulseError> {
+        if lock_token.trim().is_empty() {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Missing lock token".to_string(),
+            ));
+        }
+
         let q = self.get_or_create_queue(queue_name);
         let now = current_time_ms();
 
-        let mut remove_now = false;
-        let mut is_final = false;
+        let mut job = match self.jobs.get_mut(job_id) {
+            Some(j) => j,
+            None => return Err(TurboPulseError::InvalidJobState("Job not found".to_string())),
+        };
 
-        if let Some(mut job) = self.jobs.get_mut(job_id) {
-            if let Some(token) = lock_token {
-                if !token.is_empty() {
-                    if let Some(ref current) = job.lock_token {
-                        if current != token {
-                            return Err(TurboPulseError::InvalidJobState("LOCK_LOST: Job lock was lost or expired".to_string()));
-                        }
-                    }
-                }
-            }
-
-            q.active_ids.remove(job_id);
-            let max_retries = job.config.max_retries.unwrap_or(3);
-            if job.attempts_made < max_retries {
-                // Compute backoff
-                let backoff_type = job.config.backoff_type.unwrap_or(BackoffType::Exponential);
-                let base_ms = job.config.backoff_base_ms.unwrap_or(1000) as u64;
-                let max_ms = job.config.backoff_max_ms.unwrap_or(60000) as u64;
-                let jitter = job.config.jitter.unwrap_or(true);
-
-                let delay = calculate_backoff(job.attempts_made, backoff_type, base_ms, max_ms, jitter);
-
-                job.state = JobState::Delayed;
-                job.delay_until_ms = now + delay;
-                job.failed_reason = Some(format!("Retry {}/{}: {}", job.attempts_made, max_retries, error_msg));
-
-                let mut delayed_guard = q.delayed.lock();
-                delayed_guard.push(DelayedJob {
-                    delay_until_ms: job.delay_until_ms,
-                    job_id: job_id.to_string(),
-                });
-
-                return Ok(false);
-            } else {
-                job.state = JobState::Failed;
-                job.finished_at = Some(now);
-                job.failed_reason = Some(error_msg.to_string());
-                is_final = true;
-
-                if job.config.remove_on_fail.unwrap_or(false) {
-                    remove_now = true;
-                }
-            }
+        if job.state != JobState::Active {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Job is not in Active state".to_string(),
+            ));
         }
 
-        if is_final {
+        if job.lock_token.as_deref() != Some(lock_token) {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Lock token mismatch".to_string(),
+            ));
+        }
+
+        if let Some(expire) = q.active_ids.get(job_id) {
+            if *expire < now {
+                return Err(TurboPulseError::InvalidJobState(
+                    "LOCK_LOST: Active lease has expired".to_string(),
+                ));
+            }
+        } else {
+            return Err(TurboPulseError::InvalidJobState(
+                "LOCK_LOST: Job is not in active index".to_string(),
+            ));
+        }
+
+        job.lock_token = None;
+        q.active_ids.remove(job_id);
+
+        let max_retries = job.config.max_retries.unwrap_or(3);
+        if job.attempts_made < max_retries {
+            let backoff_type = job.config.backoff_type.unwrap_or(BackoffType::Exponential);
+            let base_ms = job.config.backoff_base_ms.unwrap_or(1000) as u64;
+            let max_ms = job.config.backoff_max_ms.unwrap_or(60000) as u64;
+            let jitter = job.config.jitter.unwrap_or(true);
+
+            let delay = calculate_backoff(job.attempts_made, backoff_type, base_ms, max_ms, jitter);
+
+            job.state = JobState::Delayed;
+            job.delay_until_ms = now + delay;
+            job.failed_reason = Some(format!(
+                "Retry {}/{}: {}",
+                job.attempts_made, max_retries, error_msg
+            ));
+
+            let mut delayed_guard = q.delayed.lock();
+            delayed_guard.push(DelayedJob {
+                delay_until_ms: job.delay_until_ms,
+                job_id: job_id.to_string(),
+            });
+
+            Ok(false)
+        } else {
+            job.state = JobState::Failed;
+            job.finished_at = Some(now);
+            job.failed_reason = Some(error_msg.to_string());
+
+            let remove_now = job.config.remove_on_fail.unwrap_or(false);
+            drop(job);
+
             if remove_now {
                 self.jobs.remove(job_id);
             } else {
                 q.failed_ids.insert(job_id.to_string(), now);
             }
-        }
 
-        Ok(is_final)
+            Ok(true)
+        }
     }
 
-    /// Promotes a delayed or waiting job to immediate waiting queue
     pub fn promote(&self, queue_name: &str, job_id: &str) -> bool {
         if let Some(mut job) = self.jobs.get_mut(job_id) {
             let actual_queue = if !job.queue_name.is_empty() {
@@ -393,34 +502,37 @@ impl InMemoryQueue {
         }
     }
 
-    /// Renews active lock on an executing job (heartbeat)
     pub fn renew_lock(
         &self,
         queue_name: &str,
         job_id: &str,
         lock_token: &str,
-        _lock_duration_ms: u32,
+        lock_duration_ms: u32,
     ) -> Result<bool, TurboPulseError> {
+        if lock_token.trim().is_empty() {
+            return Ok(false);
+        }
         let q = self.get_or_create_queue(queue_name);
         let now = current_time_ms();
+
         if let Some(job) = self.jobs.get(job_id) {
             if job.state != JobState::Active {
                 return Ok(false);
             }
-            if !lock_token.is_empty() {
-                if let Some(ref current) = job.lock_token {
-                    if current != lock_token {
-                        return Ok(false);
-                    }
-                }
+            if job.lock_token.as_deref() != Some(lock_token) {
+                return Ok(false);
             }
-            q.active_ids.insert(job_id.to_string(), now);
-            return Ok(true);
+            if let Some(mut expire) = q.active_ids.get_mut(job_id) {
+                if *expire < now {
+                    return Ok(false);
+                }
+                *expire = now + lock_duration_ms as u64;
+                return Ok(true);
+            }
         }
         Ok(false)
     }
 
-    /// Cleans jobs older than grace_ms in the specified state ('completed', 'failed', 'wait')
     pub fn clean(&self, queue_name: &str, grace_ms: u64, limit: u32, state_type: &str) -> u32 {
         let q = self.get_or_create_queue(queue_name);
         let now = current_time_ms();
@@ -428,7 +540,8 @@ impl InMemoryQueue {
 
         match state_type {
             "completed" => {
-                let to_remove: Vec<String> = q.completed_ids
+                let to_remove: Vec<String> = q
+                    .completed_ids
                     .iter()
                     .filter(|entry| now.saturating_sub(*entry.value()) >= grace_ms)
                     .take(limit as usize)
@@ -442,7 +555,8 @@ impl InMemoryQueue {
                 }
             }
             "failed" => {
-                let to_remove: Vec<String> = q.failed_ids
+                let to_remove: Vec<String> = q
+                    .failed_ids
                     .iter()
                     .filter(|entry| now.saturating_sub(*entry.value()) >= grace_ms)
                     .take(limit as usize)
@@ -461,39 +575,51 @@ impl InMemoryQueue {
         cleaned
     }
 
-    /// Recovers stalled active jobs whose heartbeats expired
-    pub fn recover_stalled(&self, queue_name: &str, lock_duration_ms: u64, max_stalled: u32) -> u32 {
+    pub fn recover_stalled(
+        &self,
+        queue_name: &str,
+        lock_duration_ms: u64,
+        max_stalled: u32,
+    ) -> u32 {
         let q = self.get_or_create_queue(queue_name);
         let now = current_time_ms();
         let mut recovered = 0;
 
-        let stalled_ids: Vec<String> = q.active_ids
+        let stalled_ids: Vec<String> = q
+            .active_ids
             .iter()
-            .filter(|entry| now.saturating_sub(*entry.value()) >= lock_duration_ms)
+            .filter(|entry| {
+                let expire = *entry.value();
+                expire <= now || (lock_duration_ms > 0 && lock_duration_ms < 30000 && expire.saturating_sub(30000) + lock_duration_ms <= now)
+            })
             .map(|entry| entry.key().clone())
             .collect();
 
         for id in stalled_ids {
             q.active_ids.remove(&id);
             if let Some(mut job) = self.jobs.get_mut(&id) {
-                job.stalled_count += 1;
-                if job.stalled_count <= max_stalled {
-                    // Re-enqueue for retry
-                    job.state = JobState::Waiting;
-                    let seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
-                    let mut waiting = q.waiting.lock();
-                    waiting.push(PrioritizedJob {
-                        priority: job.config.priority.unwrap_or(0),
-                        sequence: seq,
-                        job_id: id,
-                    });
-                    recovered += 1;
-                } else {
-                    // Mark as stalled permanently
-                    job.state = JobState::Failed;
-                    job.finished_at = Some(now);
-                    job.failed_reason = Some(format!("Stalled {} times (exceeded maxStalledCount {})", job.stalled_count, max_stalled));
-                    q.failed_ids.insert(id, now);
+                if job.state == JobState::Active {
+                    job.stalled_count += 1;
+                    job.lock_token = None;
+                    if job.stalled_count <= max_stalled {
+                        job.state = JobState::Waiting;
+                        let seq = q.sequence_counter.fetch_add(1, AtomicOrdering::Relaxed);
+                        let mut waiting = q.waiting.lock();
+                        waiting.push(PrioritizedJob {
+                            priority: job.config.priority.unwrap_or(0),
+                            sequence: seq,
+                            job_id: id,
+                        });
+                        recovered += 1;
+                    } else {
+                        job.state = JobState::Failed;
+                        job.finished_at = Some(now);
+                        job.failed_reason = Some(format!(
+                            "Stalled {} times (exceeded maxStalledCount {})",
+                            job.stalled_count, max_stalled
+                        ));
+                        q.failed_ids.insert(id, now);
+                    }
                 }
             }
         }
@@ -501,7 +627,6 @@ impl InMemoryQueue {
         recovered
     }
 
-    /// Updates arbitrary job binary payload
     pub fn update_data(&self, _queue_name: &str, job_id: &str, data: Vec<u8>) -> Result<(), TurboPulseError> {
         if let Some(mut job) = self.jobs.get_mut(job_id) {
             job.data = data;
@@ -511,12 +636,7 @@ impl InMemoryQueue {
         }
     }
 
-    pub fn update_progress(
-        &self,
-        _queue_name: &str,
-        job_id: &str,
-        progress: u32,
-    ) -> Result<(), TurboPulseError> {
+    pub fn update_progress(&self, _queue_name: &str, job_id: &str, progress: u32) -> Result<(), TurboPulseError> {
         if let Some(mut job) = self.jobs.get_mut(job_id) {
             job.progress = progress.min(100);
             Ok(())
@@ -570,5 +690,48 @@ impl InMemoryQueue {
                 self.jobs.remove(&item.job_id);
             }
         }
+    }
+
+    pub fn obliterate(&self, queue_name: &str, force: bool) -> Result<u32, TurboPulseError> {
+        let q = self.get_or_create_queue(queue_name);
+        if !force && !q.active_ids.is_empty() {
+            return Err(TurboPulseError::InvalidJobState(
+                "Cannot obliterate queue with active jobs without force=true".to_string(),
+            ));
+        }
+
+        let mut deleted = 0;
+        {
+            let mut waiting = q.waiting.lock();
+            while let Some(item) = waiting.pop() {
+                self.jobs.remove(&item.job_id);
+                deleted += 1;
+            }
+            let mut delayed = q.delayed.lock();
+            while let Some(item) = delayed.pop() {
+                self.jobs.remove(&item.job_id);
+                deleted += 1;
+            }
+        }
+
+        for item in q.active_ids.iter() {
+            self.jobs.remove(item.key());
+            deleted += 1;
+        }
+        q.active_ids.clear();
+
+        for item in q.completed_ids.iter() {
+            self.jobs.remove(item.key());
+            deleted += 1;
+        }
+        q.completed_ids.clear();
+
+        for item in q.failed_ids.iter() {
+            self.jobs.remove(item.key());
+            deleted += 1;
+        }
+        q.failed_ids.clear();
+
+        Ok(deleted)
     }
 }

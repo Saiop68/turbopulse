@@ -23,7 +23,7 @@ pub fn calculate_backoff(
         BackoffType::Fixed => base_ms,
         BackoffType::Linear => base_ms.saturating_mul(attempt.max(1) as u64),
         BackoffType::Exponential => {
-            let exp = attempt.min(30) as u32;
+            let exp = attempt.min(30);
             let multiplier = 2u64.saturating_pow(exp.saturating_sub(1));
             base_ms.saturating_mul(multiplier)
         }
