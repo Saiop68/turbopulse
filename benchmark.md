@@ -89,16 +89,26 @@ When bypassing Promise wrapper overhead for high-frequency firewall or gateway m
 
 Tested on the Ubuntu Linux VPS running against a local Redis 7.x server (`127.0.0.1:6379`) using identical ~300-byte real-world payload structures (`ORDER_FULFILLMENT` with nested items and customer metadata).
 
-### Test 4.1: Single Job Enqueue to Redis (10,000 Jobs)
+### Test 4.1: Single Sequential 1-by-1 Ping-Pong Enqueue (10,000 Jobs)
+*In a strict sequential `for` loop with `await queue.add()`, each job waits for a full TCP roundtrip over loopback before the next starts. At ~0.17 ms per TCP roundtrip, performance is bounded by network socket ping-pong latency:*
+
 | Metric | BullMQ (`5.x`) | TurboPulse (`1.0.4`) | Advantage |
 | :--- | :---: | :---: | :---: |
-| **Enqueue Speed** | 5,702 jobs/sec | **5,850 jobs/sec** | ⚡ **TurboPulse leads** |
+| **Sequential Enqueue Speed** | 5,702 jobs/sec | **5,850 jobs/sec** | ⚡ **TCP Socket Bound (~0.17ms/ping)** |
 | **Total Duration** | 1,753.91 ms | **1,709.32 ms** | ⚡ **Faster pipeline** |
 | **Mean Latency** | 186.48 µs | **176.67 µs** | ⚡ **Lower call overhead** |
 | **p50 Latency** | 120.63 µs | **125.18 µs** | Identical |
 | **p95 Latency** | 397.93 µs | **384.48 µs** | ⚡ **Tighter p95** |
 
-### Test 4.2: Batch Enqueue (`addBulk`) to Redis (5,000 Jobs)
+### Test 4.2: Real-World Concurrent / Pipelined Enqueue (10,000 Jobs, 20 Streams)
+*Production applications (Express, Fastify, microservices) process concurrent requests simultaneously rather than strictly 1-at-a-time. When 20 concurrent async streams pipeline into Redis:*
+
+| Metric | BullMQ (`5.x`) | TurboPulse (`1.0.4`) | Advantage |
+| :--- | :---: | :---: | :---: |
+| **Pipelined Throughput** | 20,878 jobs/sec | **44,217 jobs/sec** | ⚡ **2.12x faster (+112% speed)** |
+| **Total Duration** | 478.98 ms | **226.16 ms** | ⚡ **Under half the time** |
+
+### Test 4.3: Batch Enqueue (`addBulk`) to Redis (5,000 Jobs)
 Workload: Atomically enqueuing 5,000 jobs in a single batch operation.
 
 | Metric | BullMQ (`addBulk`) | TurboPulse (`addBulk`) | Advantage |
@@ -106,7 +116,7 @@ Workload: Atomically enqueuing 5,000 jobs in a single batch operation.
 | **Batch Throughput** | 13,307 jobs/sec | **24,561 jobs/sec** | ⚡ **1.85x faster (+85%)** |
 | **Total Duration** | 375.74 ms | **203.58 ms** | ⚡ **Near-instant batching** |
 
-### Test 4.3: Concurrent Worker Processing / Drain (5,000 Jobs, Concurrency = 16)
+### Test 4.4: Concurrent Worker Processing / Drain (5,000 Jobs, Concurrency = 16)
 Workload: 16 parallel worker threads processing and completing 5,000 jobs from Redis.
 
 | Metric | BullMQ (`Worker`) | TurboPulse (`Worker`) | Advantage |
@@ -165,3 +175,4 @@ console.timeEnd('1M_tokens');
 npm install turbopulse bullmq bottleneck ioredis
 node benchmark_head_to_head.js
 ```
+
