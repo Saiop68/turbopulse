@@ -4,6 +4,8 @@ Fast, zero-copy distributed rate limiter and background job queue for Node.js, b
 
 [![npm version](https://img.shields.io/npm/v/turbopulse.svg?color=cb3837)](https://www.npmjs.com/package/turbopulse)
 [![npm downloads](https://img.shields.io/npm/dm/turbopulse.svg)](https://www.npmjs.com/package/turbopulse)
+[![npm total downloads](https://img.shields.io/npm/dt/turbopulse.svg?color=success&label=total%20downloads)](https://www.npmjs.com/package/turbopulse)
+[![GitHub release](https://img.shields.io/github/v/release/Saiop68/turbopulse?color=blue)](https://github.com/Saiop68/turbopulse/releases)
 [![Node.js Version](https://img.shields.io/node/v/turbopulse.svg)](https://nodejs.org)
 [![CI](https://github.com/Saiop68/turbopulse/actions/workflows/CI.yml/badge.svg)](https://github.com/Saiop68/turbopulse/actions)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://Saiop68.github.io/turbopulse/)
@@ -100,11 +102,32 @@ TurboPulse automates resilience, scheduling, and connection management without r
 | Property | Value |
 | :--- | :--- |
 | **NPM Package** | [`turbopulse`](https://www.npmjs.com/package/turbopulse) |
-| **Latest Release** | `1.0.4` (dist-tag `latest`) |
+| **Latest Release** | `1.0.7` (dist-tag `latest`) |
 | **License** | MIT |
 | **Node.js Engine** | `>=18.0.0` (LTS 18, 20, 22, 24) |
 | **TypeScript Types** | Built-in (`dist/index.d.ts`) |
 | **Native Runtime** | Pre-compiled via `napi-rs` (Node-API v8) |
+
+### 📈 NPM Adoption & Weekly Download Velocity
+
+TurboPulse recorded **1,735 downloads** in its first week following public release:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ 🚀 TURBOPULSE NPM WEEKLY DOWNLOAD VELOCITY                             │
+├────────────────────┬──────────────┬────────────────────────────────────┤
+│ Day                │ Downloads    │ Relative Velocity                  │
+├────────────────────┼──────────────┼────────────────────────────────────┤
+│ 2026-11-03         │ 963          │ ████████████████████ (Launch Peak) │
+│ 2026-11-04         │ 596          │ ████████████                       │
+│ 2026-11-05         │ 33           │ █                                  │
+│ 2026-11-06         │ 37           │ █                                  │
+│ 2026-11-07         │ 24           │ █                                  │
+│ 2026-11-08         │ 82           │ ██                                 │
+├────────────────────┴──────────────┴────────────────────────────────────┤
+│ 🏆 Total 7-Day Downloads: 1,735+ | Registry: https://npmjs.com/package/turbopulse │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
 ### Install via your package manager:
 
@@ -619,6 +642,16 @@ Benchmarks were measured across two dedicated hardware environments:
 | **Event Loop Lag (50-Tenant Spike)** | **180ms – 320ms** *(thread stalling)* | **14.4ms** *(OS baseline tick)* | **Zero stalling** |
 | **V8 Heap Memory Retention** | +85.0 MB | **+11.4 MB** | **7.4x lower memory** |
 
+```
+Throughput Comparison (ops/sec - Higher is better):
+Legacy Pure-JS : █▍ (42,100 ops/sec)
+TurboPulse     : ████████████████████████████████████████ (3,874,808 ops/sec) [86x FASTER]
+
+Latency per Operation (µs - Lower is better):
+Legacy Pure-JS : ████████████████████████████████████████ (23.7 µs)
+TurboPulse     : ▎ (0.258 µs / 258 ns) [92x LOWER LATENCY]
+```
+
 Reproduce locally:
 ```bash
 npm run benchmark:1m-speed
@@ -641,6 +674,16 @@ Measured on the Ubuntu Cloud VPS running 50,000 job payloads against local Redis
 | **Offline In-Memory Mode** | Unsupported *(requires Redis)* | **182,410 jobs/sec** *(DashMap)* | **Native In-Memory** |
 | **V8 Heap Delta (50k jobs)** | +142.6 MB | **+14.2 MB** | **10x less V8 heap usage** |
 | **Data Transfer Mechanism** | JSON cloning across V8 heap | **Zero-Copy Node.js `Buffer` FFI** | **Zero serialization GC** |
+
+```
+Worker Throughput (Concurrency = 16, jobs/sec - Higher is better):
+Legacy Queue   : ▋ (3,281 jobs/sec)
+TurboPulse     : ████████████████████████████████████████ (19,905 jobs/sec) [6.1x FASTER]
+
+V8 Heap Memory Retention (50k jobs - Lower is better):
+Legacy Queue   : ████████████████████████████████████████ (+142.6 MB)
+TurboPulse     : ▍ (+14.2 MB) [10x LESS MEMORY / ZERO GC STALLS]
+```
 
 Reproduce locally:
 ```bash

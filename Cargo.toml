@@ -1,6 +1,6 @@
 [package]
 name = "turbopulse"
-version = "0.1.0"
+version = "1.0.7"
 edition = "2021"
 authors = ["TurboPulse Core Team"]
 description = "Production-grade distributed rate limiting & native job queue engine for Node.js using napi-rs"
