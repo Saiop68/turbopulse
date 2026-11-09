@@ -6,11 +6,29 @@ on:
       - main
     tags-ignore:
       - '**'
-    paths-ignore:
-      - '**/*.md'
-      - 'LICENSE'
-      - '**/*.gitignore'
+    paths:
+      - 'src/**'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'build.rs'
+      - '.github/workflows/CI.yml'
   pull_request:
+    paths:
+      - 'src/**'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'build.rs'
+      - '.github/workflows/CI.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
