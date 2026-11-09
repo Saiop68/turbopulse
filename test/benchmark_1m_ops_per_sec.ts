@@ -56,13 +56,13 @@ ${C.bold}${C.magenta}██████╗ ███████╗████�
 ██╔══██╗██╔══╝  ██╔══██╗╚════██║██╔══╝     ██║   ██╔══██╗██║╚════██║
 ██║  ██║███████╗██║  ██║███████║███████╗   ██║   ██║  ██║██║███████║
 ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚══════╝${C.reset}
-  ${C.bold}${C.white}🚀 1,000,000+ OPS / SECOND TARGET BENCHMARK: IN-MEMORY & REDIS${C.reset}
+  ${C.bold}${C.white}[SPEED] 1,000,000+ OPS / SECOND TARGET BENCHMARK: IN-MEMORY & REDIS${C.reset}
   ${C.dim}Environment: Node.js ${process.version} | Rust (napi-rs) | Redis 8.2.0 | Zero-GC Engine${C.reset}
   ================================================================================
 `);
 
   const initialMem = getMemory();
-  console.log(`${C.bold}📊 Initial System Baseline Memory:${C.reset}`);
+  console.log(`${C.bold}[INFO] Initial System Baseline Memory:${C.reset}`);
   console.log(`   • Process RSS: ${C.green}${initialMem.rss} MB${C.reset} | V8 Heap Used: ${C.green}${initialMem.heapUsed} MB${C.reset} | V8 Heap Total: ${initialMem.heapTotal} MB\n`);
 
   // ==========================================================================
@@ -99,7 +99,7 @@ ${C.bold}${C.magenta}██████╗ ███████╗████�
   printCard('BENCHMARK 1: IN-MEMORY 1,000,000 OPS/SEC RESULT', [
     ['Total Target Operations', `${TOTAL_IM_OPS.toLocaleString()} permits`],
     ['Total Execution Duration', `${imDurationMs.toFixed(2)} ms (${(imDurationMs / 1000).toFixed(4)} s)`],
-    ['Sustained Speed', `${C.bold}${C.green}${imOpsPerSec.toLocaleString()} ops/sec${C.reset} (🚀 EXCEEDED 1M OPS/SEC!)`],
+    ['Sustained Speed', `${C.bold}${C.green}${imOpsPerSec.toLocaleString()} ops/sec${C.reset} ([SPEED] EXCEEDED 1M OPS/SEC!)`],
     ['Average Time per Op', `${((imDurationMs / TOTAL_IM_OPS) * 1000).toFixed(3)} µs (${((imDurationMs / TOTAL_IM_OPS) * 1_000_000).toFixed(0)} nanoseconds)`],
     ['V8 Heap Used Delta', `${formatDelta(memImBefore.heapUsed, memImAfter.heapUsed)}`],
     ['Process RSS Delta', `${formatDelta(memImBefore.rss, memImAfter.rss)}`],
@@ -149,7 +149,7 @@ ${C.bold}${C.magenta}██████╗ ███████╗████�
   printCard('BENCHMARK 2: DISTRIBUTED REDIS 1,000,000 OPS/SEC RESULT', [
     ['Total Target Operations', `${TOTAL_REDIS_OPS.toLocaleString()} permits`],
     ['Total Execution Duration', `${redisDurationMs.toFixed(2)} ms (${(redisDurationMs / 1000).toFixed(4)} s)`],
-    ['Sustained Speed', `${C.bold}${C.green}${redisOpsPerSec.toLocaleString()} ops/sec${C.reset} (🚀 EXCEEDED 1M OPS/SEC!)`],
+    ['Sustained Speed', `${C.bold}${C.green}${redisOpsPerSec.toLocaleString()} ops/sec${C.reset} ([SPEED] EXCEEDED 1M OPS/SEC!)`],
     ['Average Time per Op', `${((redisDurationMs / TOTAL_REDIS_OPS) * 1000).toFixed(3)} µs (${((redisDurationMs / TOTAL_REDIS_OPS) * 1_000_000).toFixed(0)} nanoseconds)`],
     ['Distributed Quota Source', `Redis 8.2.0 at 127.0.0.1:6379 via Atomic Lua`],
     ['V8 Heap Used Delta', `${formatDelta(memRedisBefore.heapUsed, memRedisAfter.heapUsed)}`],
@@ -162,7 +162,7 @@ ${C.bold}${C.magenta}██████╗ ███████╗████�
   // ==========================================================================
   const finalMem = getMemory();
   console.log(`\n${C.bold}${C.magenta}================================================================================${C.reset}`);
-  console.log(`${C.bold}${C.white}🏆 FINAL VERDICT: 1,000,000+ OPS/SEC ACHIEVED ON BOTH ENGINES!${C.reset}`);
+  console.log(`${C.bold}${C.white}[SUMMARY] FINAL VERDICT: 1,000,000+ OPS/SEC ACHIEVED ON BOTH ENGINES!${C.reset}`);
   console.log(`${C.bold}${C.magenta}================================================================================${C.reset}`);
   console.log(`  • ${C.bold}In-Memory Engine Throughput:${C.reset}  ${C.bold}${C.green}${imOpsPerSec.toLocaleString()} ops/sec${C.reset} (${(imOpsPerSec / 1_000_000).toFixed(2)}x Goal)`);
   console.log(`  • ${C.bold}Distributed Redis Throughput:${C.reset} ${C.bold}${C.green}${redisOpsPerSec.toLocaleString()} ops/sec${C.reset} (${(redisOpsPerSec / 1_000_000).toFixed(2)}x Goal)`);
@@ -177,6 +177,6 @@ ${C.bold}${C.magenta}██████╗ ███████╗████�
 }
 
 runOneMillionOpsPerSecBenchmark().catch((err) => {
-  console.error('\n❌ Benchmark Error:', err);
+  console.error('\n[FAIL] Benchmark Error:', err);
   process.exit(1);
 });

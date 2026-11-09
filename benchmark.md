@@ -16,7 +16,7 @@
 | **In-Memory Latency** | N/A | 4,863 µs (4.86 ms) | **2.06 µs – 28.34 µs** (Up to **171x to 230x lower latency**) |
 | **Redis Batch Enqueue (`addBulk`)** | 13,307 jobs/sec | N/A | **24,561 jobs/sec (+85% faster)** |
 | **Worker Drain (Concurrency = 16)** | 8,928 jobs/sec | N/A | **11,648 jobs/sec (+30% faster)** |
-| **Standalone Offline Queueing** | ❌ **Unsupported** (Cannot run without Redis) | ❌ N/A | **✅ Supported** (**27,141 jobs/sec enqueue, 54,889 jobs/sec worker**) |
+| **Standalone Offline Queueing** | **Unsupported** (Cannot run without Redis) | N/A | **Supported** (**27,141 jobs/sec enqueue, 54,889 jobs/sec worker**) |
 | **Timer Overhead (5,000 Keys)** | N/A | 5,000 active `setTimeout` handles | **1 master hierarchical timer wheel** (0 when idle) |
 | **Data Serialization** | V8 `JSON.stringify` / `JSON.parse` across all Redis ops | In-memory JS objects | **Zero-Copy Node.js `Buffer` FFI** (zero V8 heap fragmentation) |
 
@@ -52,13 +52,13 @@ Workload: 50,000 asynchronous tasks scheduled through the limiter.
 
 | Metric | Bottleneck (`2.19.5`) | TurboPulse (`1.0.4`) | Advantage |
 | :--- | :---: | :---: | :---: |
-| **Throughput** | 205 ops/sec | **39,141 ops/sec** | ⚡ **191x faster (19,093%)** |
-| **Total Duration** | 243,635.59 ms *(~4.06 mins)* | **1,277.42 ms** *(1.27 sec)* | ⚡ **99.5% faster** |
-| **Mean Latency** | 4,863.62 µs *(4.86 ms)* | **28.34 µs** *(0.028 ms)* | ⚡ **171x lower latency** |
-| **p50 Latency (Median)** | 4,832.41 µs | **20.25 µs** | ⚡ **238x lower median** |
-| **p95 Latency** | 5,515.47 µs | **42.53 µs** | ⚡ **130x lower tail latency** |
-| **p99 Latency** | 7,094.66 µs | **159.49 µs** | ⚡ **44x lower latency spike** |
-| **V8 Heap Memory Retention** | 25.2 MB (Δ +15.4 MB) | **11.4 MB** (Δ 0 MB) | 🛡️ **Zero GC heap retention** |
+| **Throughput** | 205 ops/sec | **39,141 ops/sec** | **191x faster (19,093%)** |
+| **Total Duration** | 243,635.59 ms *(~4.06 mins)* | **1,277.42 ms** *(1.27 sec)* | **99.5% faster** |
+| **Mean Latency** | 4,863.62 µs *(4.86 ms)* | **28.34 µs** *(0.028 ms)* | **171x lower latency** |
+| **p50 Latency (Median)** | 4,832.41 µs | **20.25 µs** | **238x lower median** |
+| **p95 Latency** | 5,515.47 µs | **42.53 µs** | **130x lower tail latency** |
+| **p99 Latency** | 7,094.66 µs | **159.49 µs** | **44x lower latency spike** |
+| **V8 Heap Memory Retention** | 25.2 MB (Δ +15.4 MB) | **11.4 MB** (Δ 0 MB) | **Zero GC heap retention** |
 
 > **Why the massive gap?**  
 > Bottleneck schedules tasks using JavaScript's native `setTimeout(..., 0)` loop for every permit check. In Node.js, `setTimeout` introduces libuv timer min-heap overhead and event-loop tick delays, creating severe latency bottlenecks as queue depth grows.  
@@ -69,8 +69,8 @@ Workload: 2,000 distinct tenant keys (`tenant_0` to `tenant_1999`), each issuing
 
 | Metric | Bottleneck (`Group`) | TurboPulse (`RateLimiter.Group`) | Advantage |
 | :--- | :---: | :---: | :---: |
-| **Throughput** | 201 ops/sec | **23,323 ops/sec** | ⚡ **116x faster (11,603%)** |
-| **Total Duration** | 49,634.07 ms *(49.6 sec)* | **428.77 ms** *(0.42 sec)* | ⚡ **115x faster** |
+| **Throughput** | 201 ops/sec | **23,323 ops/sec** | **116x faster (11,603%)** |
+| **Total Duration** | 49,634.07 ms *(49.6 sec)* | **428.77 ms** *(0.42 sec)* | **115x faster** |
 
 ### Test 3.3: Native Ultra-Fast Token Bucket (`acquireSync`)
 When bypassing Promise wrapper overhead for high-frequency firewall or gateway middleware:
@@ -94,35 +94,35 @@ Tested on the Ubuntu Linux VPS running against a local Redis 7.x server (`127.0.
 
 | Metric | BullMQ (`5.x`) | TurboPulse (`1.0.4`) | Advantage |
 | :--- | :---: | :---: | :---: |
-| **Sequential Enqueue Speed** | 5,702 jobs/sec | **5,850 jobs/sec** | ⚡ **TCP Socket Bound (~0.17ms/ping)** |
-| **Total Duration** | 1,753.91 ms | **1,709.32 ms** | ⚡ **Faster pipeline** |
-| **Mean Latency** | 186.48 µs | **176.67 µs** | ⚡ **Lower call overhead** |
+| **Sequential Enqueue Speed** | 5,702 jobs/sec | **5,850 jobs/sec** | **TCP Socket Bound (~0.17ms/ping)** |
+| **Total Duration** | 1,753.91 ms | **1,709.32 ms** | **Faster pipeline** |
+| **Mean Latency** | 186.48 µs | **176.67 µs** | **Lower call overhead** |
 | **p50 Latency** | 120.63 µs | **125.18 µs** | Identical |
-| **p95 Latency** | 397.93 µs | **384.48 µs** | ⚡ **Tighter p95** |
+| **p95 Latency** | 397.93 µs | **384.48 µs** | **Tighter p95** |
 
 ### Test 4.2: Real-World Concurrent / Pipelined Enqueue (10,000 Jobs, 20 Streams)
 *Production applications (Express, Fastify, microservices) process concurrent requests simultaneously rather than strictly 1-at-a-time. When 20 concurrent async streams pipeline into Redis:*
 
 | Metric | BullMQ (`5.x`) | TurboPulse (`1.0.4`) | Advantage |
 | :--- | :---: | :---: | :---: |
-| **Pipelined Throughput** | 20,878 jobs/sec | **44,217 jobs/sec** | ⚡ **2.12x faster (+112% speed)** |
-| **Total Duration** | 478.98 ms | **226.16 ms** | ⚡ **Under half the time** |
+| **Pipelined Throughput** | 20,878 jobs/sec | **44,217 jobs/sec** | **2.12x faster (+112% speed)** |
+| **Total Duration** | 478.98 ms | **226.16 ms** | **Under half the time** |
 
 ### Test 4.3: Batch Enqueue (`addBulk`) to Redis (5,000 Jobs)
 Workload: Atomically enqueuing 5,000 jobs in a single batch operation.
 
 | Metric | BullMQ (`addBulk`) | TurboPulse (`addBulk`) | Advantage |
 | :--- | :---: | :---: | :---: |
-| **Batch Throughput** | 13,307 jobs/sec | **24,561 jobs/sec** | ⚡ **1.85x faster (+85%)** |
-| **Total Duration** | 375.74 ms | **203.58 ms** | ⚡ **Near-instant batching** |
+| **Batch Throughput** | 13,307 jobs/sec | **24,561 jobs/sec** | **1.85x faster (+85%)** |
+| **Total Duration** | 375.74 ms | **203.58 ms** | **Near-instant batching** |
 
 ### Test 4.4: Concurrent Worker Processing / Drain (5,000 Jobs, Concurrency = 16)
 Workload: 16 parallel worker threads processing and completing 5,000 jobs from Redis.
 
 | Metric | BullMQ (`Worker`) | TurboPulse (`Worker`) | Advantage |
 | :--- | :---: | :---: | :---: |
-| **Drain Speed** | 8,928 jobs/sec | **11,648 jobs/sec** | ⚡ **1.30x faster (+30%)** |
-| **Total Duration** | 560.03 ms | **429.27 ms** | ⚡ **Faster worker drain** |
+| **Drain Speed** | 8,928 jobs/sec | **11,648 jobs/sec** | **1.30x faster (+30%)** |
+| **Total Duration** | 560.03 ms | **429.27 ms** | **Faster worker drain** |
 
 > **Why does TurboPulse outperform BullMQ on the same Redis instance?**  
 > 1. **Zero-Copy Node.js `Buffer` FFI:** BullMQ executes `JSON.stringify` on every enqueue and `JSON.parse` on every worker dequeue within JavaScript. TurboPulse transfers binary buffers directly into native Rust memory, bypassing V8 JSON overhead and GC pressure.  

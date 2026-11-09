@@ -30,18 +30,18 @@ const metrics: Metrics = {
 
 async function runRealworldSimulation() {
   console.log('================================================================');
-  console.log('🌐 SIMULATING ENTERPRISE REAL-WORLD NODE.JS WORKLOAD (REDIS)');
+  console.log('[CLUSTER] SIMULATING ENTERPRISE REAL-WORLD NODE.JS WORKLOAD (REDIS)');
   console.log('================================================================\n');
 
   const redis = new Redis('redis://127.0.0.1:6379');
   const initialMemory = process.memoryUsage().heapUsed / 1024 / 1024;
-  console.log(`📊 Initial Node.js V8 Heap: ${initialMemory.toFixed(2)} MB`);
+  console.log(`[INFO] Initial Node.js V8 Heap: ${initialMemory.toFixed(2)} MB`);
 
   // ============================================================================
   // WORKLOAD 1: MULTI-TENANT WEBHOOK SPIKE (FAIRNESS & ISOLATION)
   // ============================================================================
   console.log('\n----------------------------------------------------------------');
-  console.log('🚀 WORKLOAD 1: Multi-Tenant Spike (50 Tenants + 1 Rogue Spammer)');
+  console.log('[SPEED] WORKLOAD 1: Multi-Tenant Spike (50 Tenants + 1 Rogue Spammer)');
   console.log('----------------------------------------------------------------');
   console.log('Scenario: 50 normal tenants send 10 reqs each. 1 rogue tenant spams 500 reqs.');
   console.log('Expectation: Rogue tenant is strictly throttled. Normal tenants complete with zero delay.');
@@ -87,15 +87,15 @@ async function runRealworldSimulation() {
   await Promise.all(tenantPromises);
   const elapsed_workload1 = Date.now() - t0_workload1;
 
-  console.log(`   ✅ 50 Normal tenants completed 100% of tasks! (Sample tenant_1: ${metrics.tenantCompleted['tenant_1']}/5)`);
-  console.log(`   ✅ Rogue spammer processed ${metrics.tenantCompleted[rogueTenant]} tasks safely without starving normal tenants.`);
+  console.log(`   [OK] 50 Normal tenants completed 100% of tasks! (Sample tenant_1: ${metrics.tenantCompleted['tenant_1']}/5)`);
+  console.log(`   [OK] Rogue spammer processed ${metrics.tenantCompleted[rogueTenant]} tasks safely without starving normal tenants.`);
   console.log(`   ⏱️  Multi-tenant throughput elapsed: ${elapsed_workload1} ms`);
 
   // ============================================================================
   // WORKLOAD 2: FLAKY 3RD PARTY API THROTTLING WITH AUTOMATIC RETRIES
   // ============================================================================
   console.log('\n----------------------------------------------------------------');
-  console.log('🔄 WORKLOAD 2: Flaky External API Throttling & Exponential Retries');
+  console.log('[RETRY] WORKLOAD 2: Flaky External API Throttling & Exponential Retries');
   console.log('----------------------------------------------------------------');
   console.log('Scenario: 50 requests sent to a flaky API with 25% failure rate.');
   console.log('Expectation: Built-in failed event hook retries failed calls until 100% success.');
@@ -135,15 +135,15 @@ async function runRealworldSimulation() {
   );
 
   const thirdPartyResults = await Promise.all(thirdPartyTasks);
-  console.log(`   ✅ All 40 external API calls succeeded!`);
-  console.log(`   🔁 Total attempts: ${metrics.thirdPartyCallsTotal} (including ${metrics.thirdPartyRetries} automatic retries)`);
-  console.log(`   ✅ Success count: ${metrics.thirdPartySuccess} / 40`);
+  console.log(`   [OK] All 40 external API calls succeeded!`);
+  console.log(`   [RETRY] Total attempts: ${metrics.thirdPartyCallsTotal} (including ${metrics.thirdPartyRetries} automatic retries)`);
+  console.log(`   [OK] Success count: ${metrics.thirdPartySuccess} / 40`);
 
   // ============================================================================
   // WORKLOAD 3: MIXED REAL-WORLD QUEUE (HEAVY + FAST + PROGRESS + LIFO + DEDUP)
   // ============================================================================
   console.log('\n----------------------------------------------------------------');
-  console.log('⚡ WORKLOAD 3: Mixed Distributed Queue Pipeline with Concurrency 8');
+  console.log('[FAST] WORKLOAD 3: Mixed Distributed Queue Pipeline with Concurrency 8');
   console.log('----------------------------------------------------------------');
   console.log('Scenario: Heterogeneous jobs: heavy 30ms tasks + ultra-fast 1ms tasks + progress updates.');
   console.log('Expectation: Workers dynamically process both without starvation or V8 memory leaks.');
@@ -190,7 +190,7 @@ async function runRealworldSimulation() {
     });
   }
   await queue.addBulk(bulkJobs);
-  console.log('   📤 Enqueued 100 heterogeneous jobs (20 heavy + 80 fast).');
+  console.log('   [ENQUEUE] Enqueued 100 heterogeneous jobs (20 heavy + 80 fast).');
 
   // Wait for queue to drain
   const t0_queue = Date.now();
@@ -201,20 +201,20 @@ async function runRealworldSimulation() {
     }
   }
 
-  console.log(`   ✅ 100/100 Jobs processed: ${metrics.heavyJobsFinished} heavy jobs, ${metrics.fastJobsFinished} fast jobs.`);
-  console.log(`   📈 Total progress updates persisted in Redis: ${metrics.progressUpdatesCount}`);
+  console.log(`   [OK] 100/100 Jobs processed: ${metrics.heavyJobsFinished} heavy jobs, ${metrics.fastJobsFinished} fast jobs.`);
+  console.log(`   [METRICS] Total progress updates persisted in Redis: ${metrics.progressUpdatesCount}`);
 
   // Deduplication check
   await queue.add('dedup-test', { order: 123 }, { deduplication: { id: 'order_123' } });
   await queue.add('dedup-test', { order: 123 }, { deduplication: { id: 'order_123' } }); // duplicate!
   const counts = await queue.getJobCounts();
-  console.log(`   🛡️  Deduplication test: Waiting jobs in queue = ${counts.waiting} (Expected: 1, duplicate rejected)`);
+  console.log(`   [GUARD]  Deduplication test: Waiting jobs in queue = ${counts.waiting} (Expected: 1, duplicate rejected)`);
 
   // ============================================================================
   // WORKLOAD 4: CLEANUP & ENVIRONMENT HEALTH CHECK
   // ============================================================================
   console.log('\n----------------------------------------------------------------');
-  console.log('🧹 WORKLOAD 4: Graceful Shutdown & Memory Health Audit');
+  console.log('[CLEANUP] WORKLOAD 4: Graceful Shutdown & Memory Health Audit');
   console.log('----------------------------------------------------------------');
 
   await worker.close();
@@ -227,13 +227,13 @@ async function runRealworldSimulation() {
   // Measure memory post-workload
   if (global.gc) global.gc();
   const finalMemory = process.memoryUsage().heapUsed / 1024 / 1024;
-  console.log(`📊 Final Node.js V8 Heap: ${finalMemory.toFixed(2)} MB`);
-  console.log(`📊 Net Memory Delta: ${(finalMemory - initialMemory).toFixed(2)} MB (Practically zero heap leakage)`);
+  console.log(`[INFO] Final Node.js V8 Heap: ${finalMemory.toFixed(2)} MB`);
+  console.log(`[INFO] Net Memory Delta: ${(finalMemory - initialMemory).toFixed(2)} MB (Practically zero heap leakage)`);
 
   await redis.quit();
 
   console.log('\n================================================================');
-  console.log('🏆 REAL-WORLD ENVIRONMENT AUDIT: 100% PRODUCTION READY!');
+  console.log('[SUMMARY] REAL-WORLD ENVIRONMENT AUDIT: 100% PRODUCTION READY!');
   console.log('================================================================');
   console.log('Summary of Developer Experience:');
   console.log(' - Zero configuration required for connection multiplexing.');
@@ -245,6 +245,6 @@ async function runRealworldSimulation() {
 }
 
 runRealworldSimulation().catch((err) => {
-  console.error('❌ Simulation Error:', err);
+  console.error('[FAIL] Simulation Error:', err);
   process.exit(1);
 });

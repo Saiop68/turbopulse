@@ -105,7 +105,7 @@ ${C.bold}${C.magenta}████████╗██╗   ██╗███�
 `);
 
   const initialMem = getMemory();
-  console.log(`${C.bold}📊 Initial Process Baseline Memory:${C.reset}`);
+  console.log(`${C.bold}[INFO] Initial Process Baseline Memory:${C.reset}`);
   console.log(`   • RSS: ${C.green}${initialMem.rss} MB${C.reset} | Heap Used: ${C.green}${initialMem.heapUsed} MB${C.reset} | Heap Total: ${initialMem.heapTotal} MB`);
 
   const engine = createInMemoryTurboPulse();
@@ -154,8 +154,8 @@ ${C.bold}${C.magenta}████████╗██╗   ██╗███�
     ['95th Percentile (p95)', `${stats1.p95Us} µs`],
     ['99th Percentile (p99)', `${C.yellow}${stats1.p99Us} µs${C.reset}`],
     ['Max Single Latency', `${stats1.maxUs} µs`],
-    ['V8 Heap Used Growth', `${formatDelta(memStage1Before.heapUsed, memStage1After.heapUsed)} (${memStage1Before.heapUsed}MB ➔ ${memStage1After.heapUsed}MB)`],
-    ['Process RSS Growth', `${formatDelta(memStage1Before.rss, memStage1After.rss)} (${memStage1Before.rss}MB ➔ ${memStage1After.rss}MB)`],
+    ['V8 Heap Used Growth', `${formatDelta(memStage1Before.heapUsed, memStage1After.heapUsed)} (${memStage1Before.heapUsed}MB -> ${memStage1After.heapUsed}MB)`],
+    ['Process RSS Growth', `${formatDelta(memStage1Before.rss, memStage1After.rss)} (${memStage1Before.rss}MB -> ${memStage1After.rss}MB)`],
   ]);
 
   // ==========================================================================
@@ -407,7 +407,7 @@ ${C.bold}┌──────────────────────�
   // ==========================================================================
   const finalMem = getMemory();
   console.log(`${C.bold}${C.magenta}================================================================================${C.reset}`);
-  console.log(`${C.bold}${C.white}🏆 GRAND SUMMARY: TOTAL BENCHMARK SUITE PERFORMANCE${C.reset}`);
+  console.log(`${C.bold}${C.white}[SUMMARY] GRAND SUMMARY: TOTAL BENCHMARK SUITE PERFORMANCE${C.reset}`);
   console.log(`${C.bold}${C.magenta}================================================================================${C.reset}`);
   console.log(`  • ${C.bold}Total Cumulative Operations Tested:${C.reset} ${C.cyan}650,000 operations${C.reset}`);
   console.log(`  • ${C.bold}Peak Rate Limiter Throughput:${C.reset}      ${C.green}${stage1OpsPerSec.toLocaleString()} ops/sec${C.reset} (~${stats1.meanUs} µs avg latency)`);
@@ -421,6 +421,6 @@ ${C.bold}┌──────────────────────�
 }
 
 runGodLevelBenchmark().catch((err) => {
-  console.error('\n❌ Benchmark Error:', err);
+  console.error('\n[FAIL] Benchmark Error:', err);
   process.exit(1);
 });

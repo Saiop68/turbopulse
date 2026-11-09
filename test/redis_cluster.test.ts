@@ -3,7 +3,7 @@ import { extractRedisUrl } from '../src_ts/engine';
 import { RateLimiter, Queue, Worker } from '../src_ts';
 
 console.log('====================================================');
-console.log('🧪 TESTING REDIS CLUSTER SUPPORT & HASH-TAG PINNING');
+console.log('[TEST] TESTING REDIS CLUSTER SUPPORT & HASH-TAG PINNING');
 console.log('====================================================\n');
 
 // CRC16-CCITT for Redis Cluster Slot calculation
@@ -70,7 +70,7 @@ assert.strictEqual(
   'redis://:secret@redis-node:6379',
   'Should extract and encode credentials for cluster node'
 );
-console.log('   ✅ Cluster node URL extraction and parsing verified');
+console.log('   [OK] Cluster node URL extraction and parsing verified');
 
 // 2. Test Hash-Tag Slot Pinning (No CROSSSLOT errors)
 console.log('\n▶ Test 2: Redis Cluster Hash-Tag Slot Pinning');
@@ -105,7 +105,7 @@ assert.strictEqual(slotJob1, slotJob2, 'Different jobs in same queue must map to
 assert.strictEqual(slotJob2, slotMeta, 'Job and Meta keys must map to identical slot');
 
 console.log(`   Queue: "${queueName}" -> Hash Tag: "${tag}" -> CRC16 Slot: ${slotWait}`);
-console.log('   ✅ All multi-key Lua operations share identical slot, preventing 100% of CROSSSLOT errors');
+console.log('   [OK] All multi-key Lua operations share identical slot, preventing 100% of CROSSSLOT errors');
 
 // 3. Test Limiter Hash-Tag Slot Pinning
 console.log('\n▶ Test 3: Rate Limiter Hash-Tag Slot Pinning');
@@ -114,7 +114,7 @@ const limiterTag = `{${prefix}:${limiterKey}}`;
 const limiterSlot = getRedisSlot(limiterTag);
 console.log(`   Rate Limiter Key: "${limiterKey}" -> Hash Tag: "${limiterTag}" -> CRC16 Slot: ${limiterSlot}`);
 assert(limiterSlot >= 0 && limiterSlot < 16384, 'Limiter slot must be in valid Redis slot range [0, 16383]');
-console.log('   ✅ Rate Limiter hash tag strictly hashes within valid Redis slot range');
+console.log('   [OK] Rate Limiter hash tag strictly hashes within valid Redis slot range');
 
 // 4. Test Class Instantiation with clusterNodes options
 console.log('\n▶ Test 4: Class Options Cluster Configuration Compatibility');
@@ -129,7 +129,7 @@ assert.doesNotThrow(() => {
   });
   assert(limiter != null);
 });
-console.log('   ✅ RateLimiter, Queue, and Worker options accept clusterNodes configurations');
+console.log('   [OK] RateLimiter, Queue, and Worker options accept clusterNodes configurations');
 
-console.log('\n🎉 ALL REDIS CLUSTER TESTS PASSED WITH 100% SUCCESS!');
+console.log('\n[PASS] ALL REDIS CLUSTER TESTS PASSED WITH 100% SUCCESS!');
 

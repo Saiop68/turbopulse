@@ -7,7 +7,7 @@ async function sleep(ms: number) {
 
 async function runQueueTests() {
   console.log('========================================');
-  console.log('🧪 RUNNING TURBOPULSE JOB QUEUE TESTS');
+  console.log('[TEST] RUNNING TURBOPULSE JOB QUEUE TESTS');
   console.log('========================================\n');
 
   const engine = TurboPulse.createInMemory();
@@ -39,7 +39,7 @@ async function runQueueTests() {
 
   console.log('   Processed jobs:', processedOrder);
   if (processedOrder.length === 4) {
-    console.log('   ✅ All 4 jobs completed successfully');
+    console.log('   [OK] All 4 jobs completed successfully');
   } else {
     throw new Error(`Expected 4 jobs processed, got ${processedOrder.length}`);
   }
@@ -47,7 +47,7 @@ async function runQueueTests() {
   const counts1 = await queue1.getJobCounts();
   console.log('   Queue Counts:', counts1);
   if (counts1.completed === 4 && counts1.waiting === 0) {
-    console.log('   ✅ Queue counts updated properly');
+    console.log('   [OK] Queue counts updated properly');
   } else {
     throw new Error('Counts mismatch');
   }
@@ -80,7 +80,7 @@ async function runQueueTests() {
     prioExecuted[1] === 'MED_PRIO' &&
     prioExecuted[2] === 'LOW_PRIO'
   ) {
-    console.log('   ✅ Jobs executed in exact priority order (100 -> 50 -> 0)');
+    console.log('   [OK] Jobs executed in exact priority order (100 -> 50 -> 0)');
   } else {
     throw new Error(`Priority ordering failed: ${prioExecuted.join(' -> ')}`);
   }
@@ -125,7 +125,7 @@ async function runQueueTests() {
   console.log('   Final job return value:', finalJobState?.returnvalue);
 
   if (attempts === 3 && finalJobState?.state === JobState.Completed) {
-    console.log('   ✅ Automated retry and eventual recovery succeeded');
+    console.log('   [OK] Automated retry and eventual recovery succeeded');
   } else {
     throw new Error('Retry test failed');
   }
@@ -152,7 +152,7 @@ async function runQueueTests() {
   const countBeforeDelay = delayedExecuted.length;
   console.log('   Delayed jobs running at 40ms:', countBeforeDelay);
   if (countBeforeDelay === 0) {
-    console.log('   ✅ Job not executed before delay interval');
+    console.log('   [OK] Job not executed before delay interval');
   } else {
     throw new Error('Delayed job ran prematurely');
   }
@@ -164,7 +164,7 @@ async function runQueueTests() {
   const finalDelayedCount = delayedExecuted.length;
   console.log('   Job executed at:', delayedExecuted[0], 'ms');
   if (finalDelayedCount === 1 && delayedExecuted[0] >= 90) {
-    console.log('   ✅ Delayed job executed after scheduled time');
+    console.log('   [OK] Delayed job executed after scheduled time');
   } else {
     throw new Error('Delay test failed');
   }
@@ -194,15 +194,15 @@ async function runQueueTests() {
 
   console.log('   Progress states:', progressEvents);
   if (progressEvents.join(',') === '25,50,100') {
-    console.log('   ✅ Job progress reporting verified');
+    console.log('   [OK] Job progress reporting verified');
   } else {
     throw new Error('Progress reporting failed');
   }
 
-  console.log('\n🎉 ALL QUEUE TESTS PASSED SUCCESSFULLY!\n');
+  console.log('\n[PASS] ALL QUEUE TESTS PASSED SUCCESSFULLY!\n');
 }
 
 runQueueTests().catch((err) => {
-  console.error('❌ Queue Test Failed:', err);
+  console.error('[FAIL] Queue Test Failed:', err);
   process.exit(1);
 });

@@ -91,13 +91,13 @@ ${C.bold}${C.magenta}██████╗ ███████╗███╗ 
 ██╔══██╗██╔══╝  ██║╚██╗██║██║     ██╔══██║██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ 
 ██████╔╝███████╗██║ ╚████║╚██████╗██║  ██║██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗
 ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${C.reset}
-  ${C.bold}${C.white}⚡ 1,000,000 OPERATIONS EXTREME TORTURE TEST (IN-MEMORY + REDIS)${C.reset}
+  ${C.bold}${C.white}[FAST] 1,000,000 OPERATIONS EXTREME TORTURE TEST (IN-MEMORY + REDIS)${C.reset}
   ${C.dim}Measuring Sustained Throughput, Nanosecond Latencies & RAM Delta across 1,000,000 Ops${C.reset}
   ================================================================================
 `);
 
   const initialMem = getMemory();
-  console.log(`${C.bold}📊 Initial System Memory State:${C.reset}`);
+  console.log(`${C.bold}[INFO] Initial System Memory State:${C.reset}`);
   console.log(`   • Process RSS: ${C.green}${initialMem.rss} MB${C.reset} | V8 Heap Used: ${C.green}${initialMem.heapUsed} MB${C.reset} | V8 Heap Total: ${initialMem.heapTotal} MB\n`);
 
   // ==========================================================================
@@ -163,7 +163,7 @@ ${C.bold}${C.magenta}██████╗ ███████╗███╗ 
         });
 
         process.stdout.write(
-          `   ⚡ Progress: ${C.bold}${target.toLocaleString()}${C.reset} / 1,000,000 ops | ` +
+          `   [FAST] Progress: ${C.bold}${target.toLocaleString()}${C.reset} / 1,000,000 ops | ` +
             `Throughput: ${C.green}${currentRate.toLocaleString()} ops/s${C.reset} | ` +
             `V8 Heap: ${memNow.heapUsed}MB | Elapsed: ${elapsedNow.toFixed(0)}ms\r`
         );
@@ -189,11 +189,11 @@ ${C.bold}${C.magenta}██████╗ ███████╗███╗ 
     ['95th Percentile (p95)', `${latStats1.p95Us} µs`],
     ['99th Percentile (p99)', `${C.yellow}${latStats1.p99Us} µs${C.reset}`],
     ['99.9th Percentile (p99.9)', `${latStats1.p999Us} µs`],
-    ['V8 Heap Delta (1M Ops)', `${formatDelta(memStart1.heapUsed, memEnd1.heapUsed)} (${memStart1.heapUsed}MB ➔ ${memEnd1.heapUsed}MB)`],
-    ['Process RSS Growth (1M Ops)', `${formatDelta(memStart1.rss, memEnd1.rss)} (${memStart1.rss}MB ➔ ${memEnd1.rss}MB)`],
+    ['V8 Heap Delta (1M Ops)', `${formatDelta(memStart1.heapUsed, memEnd1.heapUsed)} (${memStart1.heapUsed}MB -> ${memEnd1.heapUsed}MB)`],
+    ['Process RSS Growth (1M Ops)', `${formatDelta(memStart1.rss, memEnd1.rss)} (${memStart1.rss}MB -> ${memEnd1.rss}MB)`],
   ]);
 
-  console.log(`\n${C.bold}📈 1 Million Operations RAM Stability Progression:${C.reset}`);
+  console.log(`\n${C.bold}[METRICS] 1 Million Operations RAM Stability Progression:${C.reset}`);
   console.log(`   ┌───────────────┬──────────────┬──────────────┬──────────────┬──────────────┐`);
   console.log(`   │ Milestone     │ Elapsed Time │ Speed        │ V8 Heap Used │ Process RSS  │`);
   console.log(`   ├───────────────┼──────────────┼──────────────┼──────────────┼──────────────┤`);
@@ -266,7 +266,7 @@ ${C.bold}${C.magenta}██████╗ ███████╗███╗ 
         });
 
         process.stdout.write(
-          `   🔴 Redis Progress: ${C.bold}${target.toLocaleString()}${C.reset} / 1,000,000 ops | ` +
+          `   [REDIS] Redis Progress: ${C.bold}${target.toLocaleString()}${C.reset} / 1,000,000 ops | ` +
             `Throughput: ${C.green}${currentRate.toLocaleString()} ops/s${C.reset} | ` +
             `V8 Heap: ${memNow.heapUsed}MB | Elapsed: ${(elapsedNow / 1000).toFixed(1)}s\r`
         );
@@ -292,11 +292,11 @@ ${C.bold}${C.magenta}██████╗ ███████╗███╗ 
     ['95th Percentile (p95)', `${latStats2.p95Us} µs`],
     ['99th Percentile (p99)', `${C.yellow}${latStats2.p99Us} µs${C.reset}`],
     ['99.9th Percentile (p99.9)', `${latStats2.p999Us} µs`],
-    ['V8 Heap Delta (1M Redis Ops)', `${formatDelta(memStart2.heapUsed, memEnd2.heapUsed)} (${memStart2.heapUsed}MB ➔ ${memEnd2.heapUsed}MB)`],
-    ['Process RSS Growth (1M Redis Ops)', `${formatDelta(memStart2.rss, memEnd2.rss)} (${memStart2.rss}MB ➔ ${memEnd2.rss}MB)`],
+    ['V8 Heap Delta (1M Redis Ops)', `${formatDelta(memStart2.heapUsed, memEnd2.heapUsed)} (${memStart2.heapUsed}MB -> ${memEnd2.heapUsed}MB)`],
+    ['Process RSS Growth (1M Redis Ops)', `${formatDelta(memStart2.rss, memEnd2.rss)} (${memStart2.rss}MB -> ${memEnd2.rss}MB)`],
   ]);
 
-  console.log(`\n${C.bold}📈 1 Million Redis Operations RAM Stability Progression:${C.reset}`);
+  console.log(`\n${C.bold}[METRICS] 1 Million Redis Operations RAM Stability Progression:${C.reset}`);
   console.log(`   ┌───────────────┬──────────────┬──────────────┬──────────────┬──────────────┐`);
   console.log(`   │ Milestone     │ Elapsed Time │ Speed        │ V8 Heap Used │ Process RSS  │`);
   console.log(`   ├───────────────┼──────────────┼──────────────┼──────────────┼──────────────┤`);
@@ -312,7 +312,7 @@ ${C.bold}${C.magenta}██████╗ ███████╗███╗ 
   // ==========================================================================
   const finalMem = getMemory();
   console.log(`\n${C.bold}${C.magenta}================================================================================${C.reset}`);
-  console.log(`${C.bold}${C.white}🏆 GRAND MILLION SUMMARY: 2,000,000 TOTAL OPERATIONS COMPLETED!${C.reset}`);
+  console.log(`${C.bold}${C.white}[SUMMARY] GRAND MILLION SUMMARY: 2,000,000 TOTAL OPERATIONS COMPLETED!${C.reset}`);
   console.log(`${C.bold}${C.magenta}================================================================================${C.reset}`);
   console.log(`  • ${C.bold}1 Million Ops In-Memory Speed:${C.reset}     ${C.green}${avgOpsPerSec1.toLocaleString()} ops/sec${C.reset} (Finished in ${(totalDurationMs1 / 1000).toFixed(2)}s)`);
   console.log(`  • ${C.bold}1 Million Ops Redis Speed:${C.reset}         ${C.green}${avgOpsPerSec2.toLocaleString()} ops/sec${C.reset} (Finished in ${(totalDurationMs2 / 1000).toFixed(2)}s)`);
@@ -327,6 +327,6 @@ ${C.bold}${C.magenta}██████╗ ███████╗███╗ 
 }
 
 runOneMillionOpsBenchmark().catch((err) => {
-  console.error('\n❌ 1 Million Benchmark Error:', err);
+  console.error('\n[FAIL] 1 Million Benchmark Error:', err);
   process.exit(1);
 });

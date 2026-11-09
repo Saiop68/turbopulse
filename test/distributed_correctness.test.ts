@@ -13,7 +13,7 @@ async function sleep(ms: number): Promise<void> {
 
 async function runDistributedCorrectnessTests() {
   console.log('\n====================================================');
-  console.log('🧪 VERIFYING DISTRIBUTED P0 CORRECTNESS FIXES');
+  console.log('[TEST] VERIFYING DISTRIBUTED P0 CORRECTNESS FIXES');
   console.log('====================================================\n');
 
   const engine = createInMemoryTurboPulse();
@@ -43,7 +43,7 @@ async function runDistributedCorrectnessTests() {
       err.message.includes('LOCK_LOST'),
       `Expected error to contain LOCK_LOST, got: ${err.message}`
     );
-    console.log(`   ✅ Stale completion blocked with: "${err.message}"`);
+    console.log(`   [OK] Stale completion blocked with: "${err.message}"`);
   }
   assert.strictEqual(staleCompleteRejected, true, 'Stale complete() must be rejected with LOCK_LOST');
 
@@ -57,7 +57,7 @@ async function runDistributedCorrectnessTests() {
       err.message.includes('LOCK_LOST'),
       `Expected error to contain LOCK_LOST, got: ${err.message}`
     );
-    console.log(`   ✅ Stale fail() blocked with: "${err.message}"`);
+    console.log(`   [OK] Stale fail() blocked with: "${err.message}"`);
   }
   assert.strictEqual(staleFailRejected, true, 'Stale fail() must be rejected with LOCK_LOST');
 
@@ -65,7 +65,7 @@ async function runDistributedCorrectnessTests() {
   await rawQ.complete(jobId, Buffer.from('valid_result'), claimedJob.lockToken);
   const completedJob = await rawQ.getJob(jobId);
   assert.strictEqual(completedJob?.state, 'Completed');
-  console.log('   ✅ Legitimate owner with valid lockToken successfully completed job\n');
+  console.log('   [OK] Legitimate owner with valid lockToken successfully completed job\n');
 
   // --------------------------------------------------------------------------
   // TEST 2: Heartbeat Lock Renewal (P0 finding)
@@ -84,7 +84,7 @@ async function runDistributedCorrectnessTests() {
   assert.strictEqual(bogusRenew, false, 'renewLock must return false for mismatched token');
 
   await rawQ.complete(renewJobId, Buffer.from('ok'), jobToRenew.lockToken);
-  console.log('   ✅ Active lock renewal and fencing verified\n');
+  console.log('   [OK] Active lock renewal and fencing verified\n');
 
   // --------------------------------------------------------------------------
   // TEST 3: Heartbeat in Worker Execution
@@ -120,7 +120,7 @@ async function runDistributedCorrectnessTests() {
   const finishedHbJob = await heartbeatQ.getJob(hbJob.id);
   const hbState = await finishedHbJob?.getState();
   assert.strictEqual(hbState, 'Completed');
-  console.log('   ✅ Worker heartbeat renewed lock without letting job stall or get stolen\n');
+  console.log('   [OK] Worker heartbeat renewed lock without letting job stall or get stolen\n');
 
   // --------------------------------------------------------------------------
   // TEST 4: FlowProducer Pre-registered DAG Dependency Promotion (P0 finding)
@@ -184,7 +184,7 @@ async function runDistributedCorrectnessTests() {
   assert.ok(parentJob);
   parentState = await parentJob.getState();
   assert.strictEqual(parentState, 'Completed');
-  console.log('   ✅ FlowProducer parent dependency resolution and atomic promotion verified\n');
+  console.log('   [OK] FlowProducer parent dependency resolution and atomic promotion verified\n');
 
   // --------------------------------------------------------------------------
   // TEST 5: Rate Limiter Refund Capacity Ceiling & Local Cache Correctness
@@ -206,14 +206,14 @@ async function runDistributedCorrectnessTests() {
   assert.ok(currentReservoir !== null && currentReservoir > 0);
 
   console.log(`   Final reservoir after increment: ${currentReservoir}`);
-  console.log('   ✅ Rate Limiter refund & reservoir accounting strictly bounded\n');
+  console.log('   [OK] Rate Limiter refund & reservoir accounting strictly bounded\n');
 
   console.log('====================================================');
-  console.log('🎉 ALL 5 DISTRIBUTED P0 CORRECTNESS TESTS PASSED 100%!');
+  console.log('[PASS] ALL 5 DISTRIBUTED P0 CORRECTNESS TESTS PASSED 100%!');
   console.log('====================================================\n');
 }
 
 runDistributedCorrectnessTests().catch((e) => {
-  console.error('❌ Distributed Correctness test failure:', e);
+  console.error('[FAIL] Distributed Correctness test failure:', e);
   process.exit(1);
 });

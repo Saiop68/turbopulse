@@ -6,7 +6,7 @@ function sleep(ms: number): Promise<void> {
 
 async function runRateLimiterDropinTests() {
   console.log('====================================================');
-  console.log('🧪 VERIFYING 100% STANDALONE RATE LIMITER CAPABILITIES');
+  console.log('[TEST] VERIFYING 100% STANDALONE RATE LIMITER CAPABILITIES');
   console.log('====================================================\n');
 
   // Test 1: Basic schedule with maxConcurrent & minTime
@@ -30,7 +30,7 @@ async function runRateLimiterDropinTests() {
   console.log('   Results:', results);
   console.log('   Execution relative offsets (ms):', timestamps);
   if (results.length !== 4) throw new Error('Not all tasks finished');
-  console.log('   ✅ schedule() with maxConcurrent and minTime verified');
+  console.log('   [OK] schedule() with maxConcurrent and minTime verified');
 
   // Test 2: Reservoir Quotas and Automatic Increments
   console.log('\n▶ Test 2: Reservoir limits & incrementReservoir');
@@ -54,7 +54,7 @@ async function runRateLimiterDropinTests() {
   const incResult = await resLimiter.incrementReservoir(5);
   console.log('   Reservoir after incrementing by 5:', incResult);
   if (incResult !== 6) throw new Error(`Expected reservoir 6, got ${incResult}`);
-  console.log('   ✅ Reservoir management verified');
+  console.log('   [OK] Reservoir management verified');
 
   // Test 3: Load Shedding Strategy (highWater & OVERFLOW)
   console.log('\n▶ Test 3: Load shedding strategy: highWater & OVERFLOW');
@@ -89,7 +89,7 @@ async function runRateLimiterDropinTests() {
 
   if (!droppedCaught) throw new Error('Expected task to be dropped by OVERFLOW');
   await Promise.all([p1, p2]);
-  console.log('   ✅ OVERFLOW strategy load shedding verified');
+  console.log('   [OK] OVERFLOW strategy load shedding verified');
 
   // Test 4: wrap(), submit(), check(), and counts()
   console.log('\n▶ Test 4: wrap(), submit(), check(), and counts()');
@@ -120,7 +120,7 @@ async function runRateLimiterDropinTests() {
   const counts = helperLimiter.counts();
   console.log('   limiter counts():', counts);
   if (counts.DONE < 2) throw new Error('counts.DONE should be >= 2');
-  console.log('   ✅ wrap, submit, check, and counts verified');
+  console.log('   [OK] wrap, submit, check, and counts verified');
 
   // Test 5: Chaining limiters
   console.log('\n▶ Test 5: Chaining limiters (limiter.chain)');
@@ -141,7 +141,7 @@ async function runRateLimiterDropinTests() {
   await Promise.all([chainedTask(), chainedTask(), chainedTask()]);
   console.log('   Max concurrent executed in chained limiter:', maxConcurrentSeen);
   if (maxConcurrentSeen !== 1) throw new Error(`Expected max concurrent 1 through chain, got ${maxConcurrentSeen}`);
-  console.log('   ✅ Limiter chaining verified');
+  console.log('   [OK] Limiter chaining verified');
 
   // Test 6: RateLimiter.Group
   console.log('\n▶ Test 6: RateLimiter.Group multi-tenant sharding');
@@ -163,12 +163,12 @@ async function runRateLimiterDropinTests() {
   const activeLimiters = group.limiters();
   console.log('   Active limiters in group:', activeLimiters.length);
   if (activeLimiters.length !== 2) throw new Error(`Expected 2 limiters in group, got ${activeLimiters.length}`);
-  console.log('   ✅ RateLimiter.Group verified');
+  console.log('   [OK] RateLimiter.Group verified');
 
-  console.log('\n🎉 ALL RATE LIMITER TESTS PASSED WITH 100% SUCCESS!');
+  console.log('\n[PASS] ALL RATE LIMITER TESTS PASSED WITH 100% SUCCESS!');
 }
 
 runRateLimiterDropinTests().catch((err) => {
-  console.error('❌ Test failed:', err);
+  console.error('[FAIL] Test failed:', err);
   process.exit(1);
 });

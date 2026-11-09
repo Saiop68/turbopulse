@@ -16,8 +16,8 @@ async function sleep(ms: number): Promise<void> {
 
 async function runRedisIntegrationTests() {
   console.log('\n====================================================');
-  console.log('🧪 LIVE REDIS DISTRIBUTED CORRECTNESS INTEGRATION TESTS');
-  console.log(`📡 Redis Target: ${REDIS_URL}`);
+  console.log('[TEST] LIVE REDIS DISTRIBUTED CORRECTNESS INTEGRATION TESTS');
+  console.log(`[REDIS] Redis Target: ${REDIS_URL}`);
   console.log('====================================================\n');
 
   const engine = await createTurboPulse({
@@ -51,7 +51,7 @@ async function runRedisIntegrationTests() {
   } catch (err: any) {
     staleCompleteBlocked = true;
     assert.ok(err.message.includes('LOCK_LOST'), `Expected error to contain LOCK_LOST, got: ${err.message}`);
-    console.log(`   ✅ Stale completion blocked with: "${err.message}"`);
+    console.log(`   [OK] Stale completion blocked with: "${err.message}"`);
   }
   assert.strictEqual(staleCompleteBlocked, true, 'Stale complete() must be blocked in Redis');
 
@@ -62,7 +62,7 @@ async function runRedisIntegrationTests() {
   } catch (err: any) {
     staleFailBlocked = true;
     assert.ok(err.message.includes('LOCK_LOST'), `Expected error to contain LOCK_LOST, got: ${err.message}`);
-    console.log(`   ✅ Stale fail() blocked with: "${err.message}"`);
+    console.log(`   [OK] Stale fail() blocked with: "${err.message}"`);
   }
   assert.strictEqual(staleFailBlocked, true, 'Stale fail() must be blocked in Redis');
 
@@ -71,7 +71,7 @@ async function runRedisIntegrationTests() {
   assert.strictEqual(completeOk, true, 'Legitimate complete() must succeed');
   const finishedJob = await rawQ.getJob(testJobId);
   assert.strictEqual(finishedJob?.state, 'Completed');
-  console.log('   ✅ Legitimate owner with valid lockToken successfully completed job in Redis\n');
+  console.log('   [OK] Legitimate owner with valid lockToken successfully completed job in Redis\n');
 
   // --------------------------------------------------------------------------
   // TEST 2: Stalled Recovery via Redis TIME and Lease Expiration (P0)
@@ -106,7 +106,7 @@ async function runRedisIntegrationTests() {
   assert.notStrictEqual(reFetched.lockToken, claimedStall.lockToken, 'Recovered job must get fresh lockToken');
   await stallRaw.complete(reFetched.id, Buffer.from('done'), reFetched.lockToken);
   console.log(`   Recovered Job attemptsMade: ${reFetched.attemptsMade} | stalledCount: ${reFetched.stalledCount}`);
-  console.log('   ✅ Stalled job recovered with Redis TIME, old token invalidated\n');
+  console.log('   [OK] Stalled job recovered with Redis TIME, old token invalidated\n');
 
   // --------------------------------------------------------------------------
   // TEST 3: Atomic Retries in Lua (P1)
@@ -146,7 +146,7 @@ async function runRedisIntegrationTests() {
   const failedJob = await retryRaw.getJob(retryJobId);
   assert.strictEqual(failedJob?.state, 'Failed');
   assert.strictEqual(failedJob?.failedReason, 'permanent fatal error');
-  console.log('   ✅ Fully atomic retries, backoff, and failure state executed in Lua\n');
+  console.log('   [OK] Fully atomic retries, backoff, and failure state executed in Lua\n');
 
   // --------------------------------------------------------------------------
   // TEST 4: Monotonic Sequence & FIFO Priority Ordering in Redis (P2)
@@ -183,7 +183,7 @@ async function runRedisIntegrationTests() {
   for (const j of batch) {
     await orderRaw.complete(j.id, Buffer.from('ok'), j.lockToken);
   }
-  console.log('   ✅ Bounded monotonic sequence strictly preserved FIFO arrival order\n');
+  console.log('   [OK] Bounded monotonic sequence strictly preserved FIFO arrival order\n');
 
   // --------------------------------------------------------------------------
   // TEST 5: Duplicate Job ID Atomic Rejection (P1)
@@ -201,7 +201,7 @@ async function runRedisIntegrationTests() {
     await dedupRaw.add(dupId, 'duplicate_push', Buffer.from('data2'), {});
   } catch (err: any) {
     duplicateRejected = true;
-    console.log(`   ✅ Duplicate add() cleanly rejected: "${err.message}"`);
+    console.log(`   [OK] Duplicate add() cleanly rejected: "${err.message}"`);
   }
   assert.strictEqual(duplicateRejected, true, 'Duplicate single add must be rejected');
 
@@ -214,10 +214,10 @@ async function runRedisIntegrationTests() {
     ]);
   } catch (err: any) {
     bulkDuplicateRejected = true;
-    console.log(`   ✅ Duplicate in addBulk() atomically rejected: "${err.message}"`);
+    console.log(`   [OK] Duplicate in addBulk() atomically rejected: "${err.message}"`);
   }
   assert.strictEqual(bulkDuplicateRejected, true, 'Bulk add with duplicates must be rejected');
-  console.log('   ✅ Duplicate job IDs prevented from corrupting existing records\n');
+  console.log('   [OK] Duplicate job IDs prevented from corrupting existing records\n');
 
   // --------------------------------------------------------------------------
   // TEST 6: Drain and Obliterate with Active Job Protection (P1)
@@ -242,7 +242,7 @@ async function runRedisIntegrationTests() {
   const activeAfterDrain = await oblitRaw.getJob(activeJobId);
   assert.ok(activeAfterDrain, 'Active job must remain untouched after drain');
   assert.strictEqual(activeAfterDrain?.state, 'Active');
-  console.log('   ✅ drain() cleared waiting queue and payload without touching active jobs');
+  console.log('   [OK] drain() cleared waiting queue and payload without touching active jobs');
 
   // Obliterate without force: must be rejected because active job exists!
   let oblitGuardBlocked = false;
@@ -250,7 +250,7 @@ async function runRedisIntegrationTests() {
     await oblitRaw.obliterate(false);
   } catch (err: any) {
     oblitGuardBlocked = true;
-    console.log(`   ✅ obliterate(force=false) blocked active queue: "${err.message}"`);
+    console.log(`   [OK] obliterate(force=false) blocked active queue: "${err.message}"`);
   }
   assert.strictEqual(oblitGuardBlocked, true, 'Obliterate without force must fail if active jobs exist');
 
@@ -258,7 +258,7 @@ async function runRedisIntegrationTests() {
   await oblitRaw.obliterate(true);
   const activeAfterForce = await oblitRaw.getJob(activeJobId);
   assert.strictEqual(activeAfterForce, null, 'Active job removed by obliterate with force=true');
-  console.log('   ✅ obliterate() properly guarded active jobs and obliterated cleanly on force\n');
+  console.log('   [OK] obliterate() properly guarded active jobs and obliterated cleanly on force\n');
 
   // --------------------------------------------------------------------------
   // TEST 7: Redis Cluster FlowProducer Cross-Queue DAG (P0)
@@ -324,14 +324,14 @@ async function runRedisIntegrationTests() {
   const parentFinal = await pQueue.getJob(flowNode.job.id);
   const stateFinal = await parentFinal?.getState();
   assert.strictEqual(stateFinal, 'Completed');
-  console.log('   ✅ Cross-queue DAG executed and resolved with ZERO CROSSSLOT errors in Redis!\n');
+  console.log('   [OK] Cross-queue DAG executed and resolved with ZERO CROSSSLOT errors in Redis!\n');
 
   console.log('====================================================');
-  console.log('🎉 ALL 7 LIVE REDIS DISTRIBUTED TESTS PASSED 100%!');
+  console.log('[PASS] ALL 7 LIVE REDIS DISTRIBUTED TESTS PASSED 100%!');
   console.log('====================================================\n');
 }
 
 runRedisIntegrationTests().catch((err) => {
-  console.error('\n❌ Live Redis Integration Test Failed:', err);
+  console.error('\n[FAIL] Live Redis Integration Test Failed:', err);
   process.exit(1);
 });

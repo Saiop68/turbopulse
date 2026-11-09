@@ -6,7 +6,7 @@ function sleep(ms: number): Promise<void> {
 
 async function runQueueDropinTests() {
   console.log('====================================================');
-  console.log('🧪 VERIFYING 100% STANDALONE QUEUE & WORKER CAPABILITIES');
+  console.log('[TEST] VERIFYING 100% STANDALONE QUEUE & WORKER CAPABILITIES');
   console.log('====================================================\n');
 
   const queueName = `test_q_${Date.now()}`;
@@ -47,7 +47,7 @@ async function runQueueDropinTests() {
   console.log('   Recorded progress updates:', progressList);
   if (processedJobs.length !== 1) throw new Error('Worker failed to process job');
   if (progressList.length !== 2) throw new Error('Progress updates not captured');
-  console.log('   ✅ Queue add and Worker execution verified');
+  console.log('   [OK] Queue add and Worker execution verified');
 
   // Test 2: addBulk and priority ordering
   console.log('\n▶ Test 2: Queue.addBulk() with priority scheduling');
@@ -84,7 +84,7 @@ async function runQueueDropinTests() {
   if (executionSequence[0] !== 'URGENT' || executionSequence[1] !== 'NORMAL' || executionSequence[2] !== 'LOW') {
     throw new Error(`Expected URGENT -> NORMAL -> LOW, got ${executionSequence.join(' -> ')}`);
   }
-  console.log('   ✅ addBulk and Priority order verified (100 -> 10 -> 1)');
+  console.log('   [OK] addBulk and Priority order verified (100 -> 10 -> 1)');
 
   // Test 3: Queue clean and counts
   console.log('\n▶ Test 3: Queue.getJobCounts() and Queue.clean()');
@@ -94,7 +94,7 @@ async function runQueueDropinTests() {
 
   const cleaned = await queue.clean(0, 10, 'completed');
   console.log('   Cleaned completed jobs:', cleaned);
-  console.log('   ✅ getJobCounts() and clean() verified');
+  console.log('   [OK] getJobCounts() and clean() verified');
 
   // Test 4: FlowProducer (Parent-Child DAG Workflow)
   console.log('\n▶ Test 4: FlowProducer Parent-Child DAG dependency');
@@ -138,7 +138,7 @@ async function runQueueDropinTests() {
   if (flowExecutionOrder[2] !== 'PARENT_TASK') {
     throw new Error(`Parent task executed before children finished! Order: ${flowExecutionOrder.join(' -> ')}`);
   }
-  console.log('   ✅ FlowProducer DAG verified: Parent executed ONLY after all children completed');
+  console.log('   [OK] FlowProducer DAG verified: Parent executed ONLY after all children completed');
 
   // Test 5: QueueEvents
   console.log('\n▶ Test 5: QueueEvents listener & waitForJob');
@@ -158,7 +158,7 @@ async function runQueueDropinTests() {
   const waitResult = await waitPromise;
   console.log('   waitForJob result:', waitResult);
   if (waitResult.calculated !== 42) throw new Error(`Expected 42, got ${waitResult.calculated}`);
-  console.log('   ✅ QueueEvents and waitForJob helper verified');
+  console.log('   [OK] QueueEvents and waitForJob helper verified');
 
   // Clean up workers
   await worker.close();
@@ -168,10 +168,10 @@ async function runQueueDropinTests() {
   await qeWorker.close();
   await qeEvents.close();
 
-  console.log('\n🎉 ALL QUEUE TESTS PASSED WITH 100% SUCCESS!');
+  console.log('\n[PASS] ALL QUEUE TESTS PASSED WITH 100% SUCCESS!');
 }
 
 runQueueDropinTests().catch((err) => {
-  console.error('❌ Test Failed:', err);
+  console.error('[FAIL] Test Failed:', err);
   process.exit(1);
 });

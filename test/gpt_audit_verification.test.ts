@@ -14,7 +14,7 @@ async function sleep(ms: number): Promise<void> {
 
 async function runGptAuditVerificationTests() {
   console.log('\n====================================================');
-  console.log('🧪 VERIFYING GPT AUDIT FIXES UNDER STRESS');
+  console.log('[TEST] VERIFYING GPT AUDIT FIXES UNDER STRESS');
   console.log('====================================================\n');
 
   const engine = createInMemoryTurboPulse();
@@ -51,7 +51,7 @@ async function runGptAuditVerificationTests() {
 
   console.log(`   Max concurrently active observed: ${maxObservedActive} (Target limit: 5)`);
   assert.ok(maxObservedActive <= 5, `Concurrency breached limit! Observed ${maxObservedActive} > 5`);
-  console.log('   ✅ Concurrency CAS reservation strictly enforced with ZERO race breaches\n');
+  console.log('   [OK] Concurrency CAS reservation strictly enforced with ZERO race breaches\n');
 
   // --------------------------------------------------------------------------
   // TEST 2: Idle Worker Rate Limiter Permit Leak (GPT P0 finding)
@@ -83,7 +83,7 @@ async function runGptAuditVerificationTests() {
   await worker.close();
 
   assert.strictEqual(workerProcessed, 1, `Worker was blocked due to leaked permits! Processed: ${workerProcessed}`);
-  console.log('   ✅ Idle worker immediately releases permits when queue is empty (no permit leakage)\n');
+  console.log('   [OK] Idle worker immediately releases permits when queue is empty (no permit leakage)\n');
 
   // --------------------------------------------------------------------------
   // TEST 3: Stalled Recovery Separation (GPT P0 finding)
@@ -113,7 +113,7 @@ async function runGptAuditVerificationTests() {
   assert.strictEqual(recoveredDto?.stalledCount, 1);
 
   console.log('   Recovered Job DTO attemptsMade:', recoveredDto.attemptsMade, '| stalledCount:', recoveredDto.stalledCount);
-  console.log('   ✅ Stalled recoveries tracked independently from execution attempts\n');
+  console.log('   [OK] Stalled recoveries tracked independently from execution attempts\n');
 
   // --------------------------------------------------------------------------
   // TEST 4: LeasedRateLimiter Concurrency Isolation (GPT P0 finding)
@@ -133,7 +133,7 @@ async function runGptAuditVerificationTests() {
   await leasedLimiter.release();
 
   console.log('   Leased limiter token quota remaining in local cache:', leasedLimiter.currentLocalTokens);
-  console.log('   ✅ LeasedRateLimiter reserves token quota without concurrency inflation\n');
+  console.log('   [OK] LeasedRateLimiter reserves token quota without concurrency inflation\n');
 
   // --------------------------------------------------------------------------
   // TEST 5: FlowProducer Atomic Tree Validation (GPT P0 finding)
@@ -158,14 +158,14 @@ async function runGptAuditVerificationTests() {
   }
 
   assert.strictEqual(rejected, true, 'FlowProducer failed to reject invalid tree upfront');
-  console.log('   ✅ FlowProducer validates entire tree before enqueueing any parent or child jobs\n');
+  console.log('   [OK] FlowProducer validates entire tree before enqueueing any parent or child jobs\n');
 
   console.log('====================================================');
-  console.log('🎉 ALL 5 GPT AUDIT VERIFICATION TESTS PASSED 100%!');
+  console.log('[PASS] ALL 5 GPT AUDIT VERIFICATION TESTS PASSED 100%!');
   console.log('====================================================\n');
 }
 
 runGptAuditVerificationTests().catch((e) => {
-  console.error('❌ Verification test error:', e);
+  console.error('[FAIL] Verification test error:', e);
   process.exit(1);
 });

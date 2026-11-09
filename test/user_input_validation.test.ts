@@ -12,7 +12,7 @@ function assertThrows(fn: () => any, expectedName: string, description: string):
     if (err.name !== expectedName && !err.message.includes('Expected')) {
       throw new Error(`Failed: "${description}" threw ${err.name} (${err.message}) instead of ${expectedName}`);
     }
-    console.log(`   ✅ Correctly caught ${err.name}: "${err.message}"`);
+    console.log(`   [OK] Correctly caught ${err.name}: "${err.message}"`);
   }
 }
 
@@ -24,13 +24,13 @@ async function assertRejects(fn: () => Promise<any>, expectedName: string, descr
     if (err.name !== expectedName && !err.message.includes('Expected')) {
       throw new Error(`Failed: "${description}" rejected with ${err.name} (${err.message}) instead of ${expectedName}`);
     }
-    console.log(`   ✅ Correctly caught rejection ${err.name}: "${err.message}"`);
+    console.log(`   [OK] Correctly caught rejection ${err.name}: "${err.message}"`);
   }
 }
 
 async function runValidationTests() {
   console.log('====================================================');
-  console.log('🛡️ TESTING USER-FACING INPUT VALIDATION & ERROR GUARDS');
+  console.log('[GUARD] TESTING USER-FACING INPUT VALIDATION & ERROR GUARDS');
   console.log('====================================================\n');
 
   // ----------------------------------------------------
@@ -75,7 +75,7 @@ async function runValidationTests() {
   await new Promise<void>((resolve, reject) => {
     limiter.submit(null as any, (err: any) => {
       if (err instanceof TypeError) {
-        console.log(`   ✅ limiter.submit callback received expected TypeError: "${err.message}"`);
+        console.log(`   [OK] limiter.submit callback received expected TypeError: "${err.message}"`);
         resolve();
       } else {
         reject(new Error(`limiter.submit callback did not receive TypeError: ${err}`));
@@ -140,7 +140,7 @@ async function runValidationTests() {
   await assertRejects(() => (qEvents as any).waitForJob(''), 'TypeError', 'qEvents.waitForJob("") with empty jobId');
   await assertRejects(() => (qEvents as any).waitForJob('job-1', 'completed', -1), 'TypeError', 'qEvents.waitForJob with negative timeout');
 
-  console.log('\n🎉 ALL USER ERROR GUARDS VALIDATED SUCCESSFULLY!');
+  console.log('\n[PASS] ALL USER ERROR GUARDS VALIDATED SUCCESSFULLY!');
   process.exit(0);
 }
 

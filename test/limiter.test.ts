@@ -7,7 +7,7 @@ async function sleep(ms: number) {
 
 async function runLimiterTests() {
   console.log('========================================');
-  console.log('🧪 RUNNING TURBOPULSE RATE LIMITER TESTS');
+  console.log('[TEST] RUNNING TURBOPULSE RATE LIMITER TESTS');
   console.log('========================================\n');
 
   const engine = TurboPulse.createInMemory();
@@ -38,13 +38,13 @@ async function runLimiterTests() {
   // First 3 should execute immediately (burst 0-50ms)
   // Next 3 should wait for refill (~500ms)
   if (executedAt[0] < 50 && executedAt[1] < 50 && executedAt[2] < 50) {
-    console.log('   ✅ Burst capacity (3 tasks) executed immediately');
+    console.log('   [OK] Burst capacity (3 tasks) executed immediately');
   } else {
     throw new Error('Burst capacity failed');
   }
 
   if (executedAt[3] >= 150 && executedAt[5] >= 450) {
-    console.log('   ✅ Throttled tasks properly paused until bucket refilled (token bucket continuous refill)');
+    console.log('   [OK] Throttled tasks properly paused until bucket refilled (token bucket continuous refill)');
   } else {
     throw new Error('Refill delay failed');
   }
@@ -74,7 +74,7 @@ async function runLimiterTests() {
   await Promise.all(concPromises);
   console.log('   Max simultaneously running tasks:', maxObservedRunning);
   if (maxObservedRunning <= 2) {
-    console.log('   ✅ maxConcurrent limit strictly respected');
+    console.log('   [OK] maxConcurrent limit strictly respected');
   } else {
     throw new Error(`Concurrency exceeded limit: observed ${maxObservedRunning}`);
   }
@@ -101,7 +101,7 @@ async function runLimiterTests() {
   const diff2 = timestamps[2] - timestamps[1];
   console.log(`   Gaps: ${diff1}ms, ${diff2}ms`);
   if (diff1 >= 40 && diff2 >= 40) {
-    console.log('   ✅ minTime spacing between calls verified');
+    console.log('   [OK] minTime spacing between calls verified');
   } else {
     throw new Error('minTime spacing failed');
   }
@@ -127,7 +127,7 @@ async function runLimiterTests() {
 
   console.log('   User A results:', userAResults);
   console.log('   User B results:', userBResults);
-  console.log('   ✅ Independent per-tenant group limits verified');
+  console.log('   [OK] Independent per-tenant group limits verified');
 
   // TEST 5: wrap() and submit() API compatibility
   console.log('\n▶ Test 5: wrap() and submit() API compatibility');
@@ -148,10 +148,10 @@ async function runLimiterTests() {
     );
   });
 
-  console.log('\n🎉 ALL RATE LIMITER TESTS PASSED SUCCESSFULLY!\n');
+  console.log('\n[PASS] ALL RATE LIMITER TESTS PASSED SUCCESSFULLY!\n');
 }
 
 runLimiterTests().catch((err) => {
-  console.error('❌ Limiter Test Failed:', err);
+  console.error('[FAIL] Limiter Test Failed:', err);
   process.exit(1);
 });

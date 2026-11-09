@@ -135,7 +135,7 @@ ${C.bold}${C.red}██████╗ ███████╗█████�
   const redisMem = redisInfo['used_memory_human'] || 'N/A';
   const initialMem = getMemory();
 
-  console.log(`${C.bold}🔴 Redis Server Detected:${C.reset}`);
+  console.log(`${C.bold}[REDIS] Redis Server Detected:${C.reset}`);
   console.log(`   • Server Version: ${C.cyan}${redisVer}${C.reset}`);
   console.log(`   • Initial Redis Memory: ${C.cyan}${redisMem}${C.reset}`);
   console.log(`   • Node.js Process Baseline RSS: ${C.green}${initialMem.rss} MB${C.reset} | Heap Used: ${C.green}${initialMem.heapUsed} MB${C.reset}\n`);
@@ -148,7 +148,7 @@ ${C.bold}${C.red}██████╗ ███████╗█████�
     keyPrefix: 'turbopulse_bench',
   });
 
-  console.log(`${C.green}✅ TurboPulse native engine successfully bound to Redis cluster/standalone instance!${C.reset}`);
+  console.log(`${C.green}[OK] TurboPulse native engine successfully bound to Redis cluster/standalone instance!${C.reset}`);
 
   // ==========================================================================
   // STAGE 1: Redis Distributed Rate Limiter (50,000 Atomic Operations)
@@ -387,7 +387,7 @@ ${C.bold}${C.red}██████╗ ███████╗█████�
   const finalRedisMem = finalRedisInfo['used_memory_human'] || 'N/A';
 
   console.log(`${C.bold}${C.magenta}================================================================================${C.reset}`);
-  console.log(`${C.bold}${C.white}🏆 GRAND SUMMARY: REDIS DISTRIBUTED BENCHMARK SUITE${C.reset}`);
+  console.log(`${C.bold}${C.white}[SUMMARY] GRAND SUMMARY: REDIS DISTRIBUTED BENCHMARK SUITE${C.reset}`);
   console.log(`${C.bold}${C.magenta}================================================================================${C.reset}`);
   console.log(`  • ${C.bold}Total Cumulative Redis Operations:${C.reset}  ${C.cyan}150,000 Redis network operations${C.reset}`);
   console.log(`  • ${C.bold}Peak Distributed Rate Throughput:${C.reset}   ${C.green}${stage2OpsPerSec.toLocaleString()} ops/sec${C.reset}`);
@@ -403,6 +403,6 @@ ${C.bold}${C.red}██████╗ ███████╗█████�
 }
 
 runRedisBenchmark().catch((err) => {
-  console.error('\n❌ Redis Benchmark Error:', err);
+  console.error('\n[FAIL] Redis Benchmark Error:', err);
   process.exit(1);
 });

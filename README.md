@@ -108,13 +108,13 @@ TurboPulse automates resilience, scheduling, and connection management without r
 | **TypeScript Types** | Built-in (`dist/index.d.ts`) |
 | **Native Runtime** | Pre-compiled via `napi-rs` (Node-API v8) |
 
-### 📈 NPM Adoption & Weekly Download Velocity
+### NPM Adoption & Weekly Download Velocity
 
 TurboPulse recorded **1,735 downloads** in its first week following public release:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 🚀 TURBOPULSE NPM WEEKLY DOWNLOAD VELOCITY                             │
+│ TURBOPULSE NPM WEEKLY DOWNLOAD VELOCITY                                │
 ├────────────────────┬──────────────┬────────────────────────────────────┤
 │ Day                │ Downloads    │ Relative Velocity                  │
 ├────────────────────┼──────────────┼────────────────────────────────────┤
@@ -125,7 +125,7 @@ TurboPulse recorded **1,735 downloads** in its first week following public relea
 │ 2026-11-07         │ 24           │ █                                  │
 │ 2026-11-08         │ 82           │ ██                                 │
 ├────────────────────┴──────────────┴────────────────────────────────────┤
-│ 🏆 Total 7-Day Downloads: 1,735+ | Registry: https://npmjs.com/package/turbopulse │
+│ Total 7-Day Downloads: 1,735+ | Registry: https://npmjs.com/package/turbopulse │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -604,7 +604,7 @@ events.on('progress', ({ jobId, data }) => {
 
 ## Benchmarks & Performance Specs
 
-> 📖 **Comprehensive Head-to-Head Report:**  
+> **Comprehensive Head-to-Head Report:**  
 > For complete, empirical benchmarks comparing **TurboPulse vs. BullMQ** and **TurboPulse vs. Bottleneck** (with exact latency percentiles, p50, p95, p99, and memory footprints), see [**`benchmark.md`**](benchmark.md).
 
 ### The Zero-Infrastructure Advantage: TurboPulse vs. BullMQ
