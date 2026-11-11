@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem with TurboPulse
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please include the engine mode,
+        Node version, and a minimal reproduction.
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: v20.11.0
+    validations:
+      required: true
+  - type: dropdown
+    id: engine-mode
+    attributes:
+      label: Engine mode
+      options:
+        - In-memory
+        - Redis (standalone)
+        - Redis Sentinel
+        - Redis Cluster
+    validations:
+      required: true
+  - type: input
+    id: turbopulse-version
+    attributes:
+      label: turbopulse version
+      placeholder: 1.0.7
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal code that reproduces the issue
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true

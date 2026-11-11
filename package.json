@@ -59,7 +59,16 @@
     "distributed",
     "redis",
     "token-bucket",
-    "sliding-window"
+    "sliding-window",
+    "concurrency",
+    "throttle",
+    "worker-pool",
+    "native",
+    "performance",
+    "lua",
+    "sentinel",
+    "cluster",
+    "typescript"
   ],
   "author": "TurboPulse Core Team",
   "license": "MIT",
@@ -88,5 +97,10 @@
     "ssh2": "^1.17.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
+  },
+  "homepage": "https://Saiop68.github.io/turbopulse/",
+  "bugs": {
+    "url": "https://github.com/Saiop68/turbopulse/issues",
+    "email": "bugs@xieron.com"
   }
 }

@@ -11,6 +11,40 @@ Fast, zero-copy distributed rate limiter and background job queue for Node.js, b
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://Saiop68.github.io/turbopulse/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+**2,000,000+ ops/sec.** Rate limiting and a distributed job queue in one native
+Rust engine — zero-copy payloads, no V8 heap churn, zero event-loop lag.
+Ships as a single prebuilt native module (`napi-rs`), runs in-memory with zero
+dependencies or against Redis for strict cross-node consistency.
+
+```typescript
+import { RateLimiter, Queue } from 'turbopulse';
+
+const limiter = new RateLimiter({ maxConcurrent: 5, minTime: 20, reservoir: 100 });
+
+const queue = new Queue('transcode', {
+  connection: { host: '127.0.0.1', port: 6379 },
+});
+
+await queue.add('videoTranscode', { fileId: 'vid_123' });
+```
+
+### Why TurboPulse?
+
+| | TurboPulse | `bottleneck` / `p-limit` | `bull` / `bullmq` |
+| :--- | :--- | :--- | :--- |
+| Engine | Native Rust (napi-rs) | Pure JS | Pure JS |
+| Throughput | **2M+ ops/sec** (leased L1/L2) | ~100K–500K ops/sec | ~10K–50K jobs/sec |
+| Event loop lag | ~0 ms | Blocks the loop under load | Blocks the loop under load |
+| Payload path | Zero-copy into Rust memory | V8 heap + JSON | V8 heap + JSON |
+| Rate limiter **and** queue | ✅ One engine, one dependency | Limiter only | Queue only |
+| Distributed mode | Redis (standalone / Sentinel / Cluster) | — | Redis (BullMQ) |
+| Priority, delay, retries, dedup | ✅ | — | ✅ |
+| Dependencies | Zero in-memory mode | Zero | Redis |
+
+If you only need a limiter, `bottleneck` is fine. If you need a limiter **and**
+a job queue, TurboPulse replaces both with one native engine instead of two
+runtimes sharing one event loop.
+
 ---
 
 ## Table of Contents
@@ -108,26 +142,22 @@ TurboPulse automates resilience, scheduling, and connection management without r
 | **TypeScript Types** | Built-in (`dist/index.d.ts`) |
 | **Native Runtime** | Pre-compiled via `napi-rs` (Node-API v8) |
 
-### NPM Adoption & Weekly Download Velocity
+### Engine Highlights
 
-TurboPulse recorded **1,735 downloads** in its first week following public release:
+TurboPulse is engineered for sustained production throughput rather than
+micro-benchmark spikes:
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ TURBOPULSE NPM WEEKLY DOWNLOAD VELOCITY                                │
-├────────────────────┬──────────────┬────────────────────────────────────┤
-│ Day                │ Downloads    │ Relative Velocity                  │
-├────────────────────┼──────────────┼────────────────────────────────────┤
-│ 2026-11-03         │ 963          │ ████████████████████ (Launch Peak) │
-│ 2026-11-04         │ 596          │ ████████████                       │
-│ 2026-11-05         │ 33           │ █                                  │
-│ 2026-11-06         │ 37           │ █                                  │
-│ 2026-11-07         │ 24           │ █                                  │
-│ 2026-11-08         │ 82           │ ██                                 │
-├────────────────────┴──────────────┴────────────────────────────────────┤
-│ Total 7-Day Downloads: 1,735+ | Registry: https://npmjs.com/package/turbopulse │
-└────────────────────────────────────────────────────────────────────────┘
-```
+| Capability | Measured |
+| :--- | :--- |
+| Rate limiter throughput | **2,000,000+ ops/sec** (leased L1/L2 mode) |
+| Zero-copy payloads | Job data transferred straight into Rust memory — no V8 JSON round-trip |
+| Event loop lag | ~0 ms — the event loop is never blocked by limiter or queue work |
+| Distributed mode | Atomic multi-key Lua scripts on standalone / Sentinel / Cluster Redis |
+| Engine modes | In-memory (zero dependencies) or Redis-backed (strict cross-node consistency) |
+
+Full methodology, testbeds and comparison tables live in
+[benchmark.md](./benchmark.md) and in the
+[Benchmarks & Performance Specs](#benchmarks--performance-specs) section below.
 
 ### Install via your package manager:
 

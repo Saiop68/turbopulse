@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a capability or improvement for TurboPulse
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case, not just the API you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: engine-mode
+    attributes:
+      label: Which engine mode is affected?
+      options:
+        - Both
+        - In-memory
+        - Redis
