@@ -45,6 +45,39 @@ If you only need a limiter, `bottleneck` is fine. If you need a limiter **and**
 a job queue, TurboPulse replaces both with one native engine instead of two
 runtimes sharing one event loop.
 
+### Built for Discord bot backends
+
+Discord bots are the sharpest edge case for JS concurrency, and the one
+TurboPulse was built for:
+
+| Discord bot problem | TurboPulse |
+| :--- | :--- |
+| **REST rate limits** — Discord allows ~50 req/s globally, plus per-route buckets | `RateLimiter` with per-route buckets mirrors Discord's own bucket model, so you never 429 yourself |
+| **Shard fan-out** — 1000s of guilds, one process | Multi-tenant limiter groups isolate per-guild quotas without lock contention |
+| **Interaction deadline** — Discord kills an interaction after 3s | `schedule()` with priority + non-blocking permits keeps the event loop free |
+| **Heavy jobs off the hot path** — transcodes, image resizes, API enrichment | `Queue` with priority, delay, exponential backoff, jitter and dedup |
+| **Multi-process scaling** (PM2 cluster, multiple VPS) | Redis mode gives strict cross-node consistency with atomic Lua scripts |
+| **Event loop stall = bot freezes** | Native Rust engine → ~0 ms event loop lag even under 2M ops/sec |
+
+```typescript
+// Per-guild REST rate limiting that mirrors Discord's bucket model
+const limiter = new RateLimiterGroup({
+  maxConcurrent: 25,
+  minTime: 40,                        // ~25 req/s per guild, safely under Discord's 50
+  reservoir: 25,
+  reservoirRefreshAmount: 25,
+  reservoirRefreshInterval: 1000,
+});
+
+// Offload heavy work so the gateway heartbeat never misses
+const queue = new Queue('media', { connection: { host: '127.0.0.1', port: 6379 } });
+await queue.add('thumbnail', { messageId, url }, {
+  priority: 5,
+  attempts: 3,
+  backoff: { type: 'exponential', delay: 1000, jitter: true },
+});
+```
+
 ---
 
 ## Table of Contents
